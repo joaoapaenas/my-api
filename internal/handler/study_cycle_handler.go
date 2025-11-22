@@ -162,6 +162,22 @@ func (h *StudyCycleHandler) DeleteStudyCycle(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetActiveCycleWithItems godoc
+// @Summary Get active cycle with all items (round-robin)
+// @Tags study_cycles
+// @Produce json
+// @Success 200 {array} handler.CycleItemWithSubjectResponse
+// @Router /study-cycles/active/items [get]
+func (h *StudyCycleHandler) GetActiveCycleWithItems(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.GetActiveCycleWithItems(r.Context())
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, items)
+}
+
 func (h *StudyCycleHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

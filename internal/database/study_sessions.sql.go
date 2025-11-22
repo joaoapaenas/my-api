@@ -56,6 +56,44 @@ func (q *Queries) DeleteStudySession(ctx context.Context, id string) error {
 	return err
 }
 
+const getOpenSession = `-- name: GetOpenSession :one
+SELECT 
+    ss.id,
+    ss.subject_id,
+    ss.cycle_item_id,
+    ss.started_at,
+    s.name AS subject_name,
+    s.color_hex
+FROM study_sessions ss
+JOIN subjects s ON ss.subject_id = s.id
+WHERE ss.finished_at IS NULL
+ORDER BY ss.started_at DESC
+LIMIT 1
+`
+
+type GetOpenSessionRow struct {
+	ID          string         `json:"id"`
+	SubjectID   string         `json:"subject_id"`
+	CycleItemID sql.NullString `json:"cycle_item_id"`
+	StartedAt   string         `json:"started_at"`
+	SubjectName string         `json:"subject_name"`
+	ColorHex    sql.NullString `json:"color_hex"`
+}
+
+func (q *Queries) GetOpenSession(ctx context.Context) (GetOpenSessionRow, error) {
+	row := q.db.QueryRowContext(ctx, getOpenSession)
+	var i GetOpenSessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectID,
+		&i.CycleItemID,
+		&i.StartedAt,
+		&i.SubjectName,
+		&i.ColorHex,
+	)
+	return i, err
+}
+
 const getStudySession = `-- name: GetStudySession :one
 SELECT id, subject_id, cycle_item_id, started_at, finished_at, gross_duration_seconds, net_duration_seconds, notes, created_at, updated_at FROM study_sessions
 WHERE id = ?

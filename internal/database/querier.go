@@ -25,13 +25,20 @@ type Querier interface {
 	DeleteSubject(ctx context.Context, id string) error
 	DeleteTopic(ctx context.Context, id string) error
 	EndSessionPause(ctx context.Context, arg EndSessionPauseParams) error
+	GetAccuracyBySubject(ctx context.Context) ([]GetAccuracyBySubjectRow, error)
+	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]GetAccuracyByTopicRow, error)
+	GetActiveCycleWithItems(ctx context.Context) ([]GetActiveCycleWithItemsRow, error)
 	GetActiveStudyCycle(ctx context.Context) (StudyCycle, error)
+	GetActivityHeatmap(ctx context.Context, dollar_1 string) ([]GetActivityHeatmapRow, error)
 	GetCycleItem(ctx context.Context, id string) (CycleItem, error)
 	GetExerciseLog(ctx context.Context, id string) (ExerciseLog, error)
+	GetOpenSession(ctx context.Context) (GetOpenSessionRow, error)
 	GetSessionPause(ctx context.Context, id string) (SessionPause, error)
 	GetStudyCycle(ctx context.Context, id string) (StudyCycle, error)
 	GetStudySession(ctx context.Context, id string) (StudySession, error)
 	GetSubject(ctx context.Context, id string) (Subject, error)
+	// Analytics Queries for Study App
+	GetTimeReportBySubject(ctx context.Context, arg GetTimeReportBySubjectParams) ([]GetTimeReportBySubjectRow, error)
 	GetTopic(ctx context.Context, id string) (Topic, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	ListCycleItems(ctx context.Context, cycleID string) ([]CycleItem, error)

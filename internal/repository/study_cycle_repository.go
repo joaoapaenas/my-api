@@ -12,6 +12,7 @@ type StudyCycleRepository interface {
 	GetStudyCycle(ctx context.Context, id string) (database.StudyCycle, error)
 	UpdateStudyCycle(ctx context.Context, arg database.UpdateStudyCycleParams) error
 	DeleteStudyCycle(ctx context.Context, id string) error
+	GetActiveCycleWithItems(ctx context.Context) ([]database.GetActiveCycleWithItemsRow, error)
 }
 
 type SQLStudyCycleRepository struct {
@@ -40,4 +41,8 @@ func (r *SQLStudyCycleRepository) UpdateStudyCycle(ctx context.Context, arg data
 
 func (r *SQLStudyCycleRepository) DeleteStudyCycle(ctx context.Context, id string) error {
 	return r.q.DeleteStudyCycle(ctx, id)
+}
+
+func (r *SQLStudyCycleRepository) GetActiveCycleWithItems(ctx context.Context) ([]database.GetActiveCycleWithItemsRow, error) {
+	return r.q.GetActiveCycleWithItems(ctx)
 }

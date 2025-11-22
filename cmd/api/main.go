@@ -69,6 +69,7 @@ func main() {
 	studySessionRepo := repository.NewSQLStudySessionRepository(queries)
 	sessionPauseRepo := repository.NewSQLSessionPauseRepository(queries)
 	exerciseLogRepo := repository.NewSQLExerciseLogRepository(queries)
+	analyticsRepo := repository.NewSQLAnalyticsRepository(queries)
 
 	// Services
 	userService := service.NewUserManager(userRepo)
@@ -79,6 +80,7 @@ func main() {
 	studySessionService := service.NewStudySessionManager(studySessionRepo)
 	sessionPauseService := service.NewSessionPauseManager(sessionPauseRepo)
 	exerciseLogService := service.NewExerciseLogManager(exerciseLogRepo)
+	analyticsService := service.NewAnalyticsManager(analyticsRepo)
 
 	// Handlers
 	userHandler := handler.NewUserHandler(userService)
@@ -89,6 +91,7 @@ func main() {
 	studySessionHandler := handler.NewStudySessionHandler(studySessionService)
 	sessionPauseHandler := handler.NewSessionPauseHandler(sessionPauseService)
 	exerciseLogHandler := handler.NewExerciseLogHandler(exerciseLogService)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsService)
 
 	// 4. Router Setup
 	r := chi.NewRouter()
@@ -131,6 +134,7 @@ func main() {
 	r.Route("/study-cycles", func(r chi.Router) {
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
+		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems) // Round-robin
 		r.Get("/{id}", studyCycleHandler.GetStudyCycle)
 		r.Put("/{id}", studyCycleHandler.UpdateStudyCycle)
 		r.Delete("/{id}", studyCycleHandler.DeleteStudyCycle)
@@ -146,6 +150,7 @@ func main() {
 
 	r.Route("/study-sessions", func(r chi.Router) {
 		r.Post("/", studySessionHandler.CreateStudySession)
+		r.Get("/open", studySessionHandler.GetOpenSession) // Crash recovery
 		r.Get("/{id}", studySessionHandler.GetStudySession)
 		r.Put("/{id}", studySessionHandler.UpdateSessionDuration)
 		r.Delete("/{id}", studySessionHandler.DeleteStudySession)
@@ -162,6 +167,14 @@ func main() {
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
 		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
+	})
+
+	// Analytics routes
+	r.Route("/analytics", func(r chi.Router) {
+		r.Get("/time-by-subject", analyticsHandler.GetTimeReportBySubject)
+		r.Get("/accuracy-by-subject", analyticsHandler.GetAccuracyBySubject)
+		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetAccuracyByTopic)
+		r.Get("/heatmap", analyticsHandler.GetActivityHeatmap)
 	})
 
 	// 5. Server

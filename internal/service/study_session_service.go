@@ -14,6 +14,7 @@ type StudySessionService interface {
 	UpdateSessionDuration(ctx context.Context, id, finishedAt string, grossSeconds, netSeconds int, notes string) error
 	GetStudySession(ctx context.Context, id string) (database.StudySession, error)
 	DeleteStudySession(ctx context.Context, id string) error
+	GetOpenSession(ctx context.Context) (database.GetOpenSessionRow, error)
 }
 
 type StudySessionManager struct {
@@ -76,4 +77,8 @@ func (s *StudySessionManager) GetStudySession(ctx context.Context, id string) (d
 
 func (s *StudySessionManager) DeleteStudySession(ctx context.Context, id string) error {
 	return s.repo.DeleteStudySession(ctx, id)
+}
+
+func (s *StudySessionManager) GetOpenSession(ctx context.Context) (database.GetOpenSessionRow, error) {
+	return s.repo.GetOpenSession(ctx)
 }

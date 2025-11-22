@@ -139,6 +139,22 @@ func (h *StudySessionHandler) DeleteStudySession(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetOpenSession godoc
+// @Summary Get open/unfinished session (crash recovery)
+// @Tags study_sessions
+// @Produce json
+// @Success 200 {object} handler.OpenSessionResponse
+// @Router /study-sessions/open [get]
+func (h *StudySessionHandler) GetOpenSession(w http.ResponseWriter, r *http.Request) {
+	session, err := h.svc.GetOpenSession(r.Context())
+	if err != nil {
+		h.respondWithError(w, http.StatusNotFound, "No open session found")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, session)
+}
+
 func (h *StudySessionHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

@@ -92,3 +92,53 @@ type ValidationErrorResponse struct {
 	Error   string            `json:"error"`
 	Details map[string]string `json:"details"`
 }
+
+// New response DTOs for TODO features
+type CycleItemWithSubjectResponse struct {
+	CycleItemID            string `json:"cycle_item_id"`
+	OrderIndex             int    `json:"order_index"`
+	PlannedDurationMinutes int    `json:"planned_duration_minutes,omitempty"`
+	SubjectID              string `json:"subject_id"`
+	SubjectName            string `json:"subject_name"`
+	ColorHex               string `json:"color_hex,omitempty"`
+}
+
+type OpenSessionResponse struct {
+	ID          string `json:"id"`
+	SubjectID   string `json:"subject_id"`
+	CycleItemID string `json:"cycle_item_id,omitempty"`
+	StartedAt   string `json:"started_at"`
+	SubjectName string `json:"subject_name"`
+	ColorHex    string `json:"color_hex,omitempty"`
+}
+
+type TimeReportResponse struct {
+	SubjectID     string  `json:"subject_id"`
+	SubjectName   string  `json:"subject_name"`
+	ColorHex      string  `json:"color_hex,omitempty"`
+	SessionsCount int     `json:"sessions_count"`
+	TotalHoursNet float64 `json:"total_hours_net"`
+}
+
+type AccuracyReportResponse struct {
+	SubjectID          string  `json:"subject_id"`
+	SubjectName        string  `json:"subject_name"`
+	ColorHex           string  `json:"color_hex,omitempty"`
+	TotalQuestions     int     `json:"total_questions"`
+	TotalCorrect       int     `json:"total_correct"`
+	AccuracyPercentage float64 `json:"accuracy_percentage"`
+}
+
+type TopicAccuracyResponse struct {
+	TopicID            string  `json:"topic_id"`
+	TopicName          string  `json:"topic_name"`
+	TotalQuestions     int     `json:"total_questions"`
+	TotalCorrect       int     `json:"total_correct"`
+	AccuracyPercentage float64 `json:"accuracy_percentage"`
+}
+
+type HeatmapDayResponse struct {
+	StudyDate     string `json:"study_date"`
+	SessionsCount int    `json:"sessions_count"`
+	TotalSeconds  int    `json:"total_seconds"`
+}

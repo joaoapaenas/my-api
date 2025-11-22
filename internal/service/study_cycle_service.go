@@ -15,6 +15,7 @@ type StudyCycleService interface {
 	GetStudyCycle(ctx context.Context, id string) (database.StudyCycle, error)
 	UpdateStudyCycle(ctx context.Context, id, name, description string, isActive bool) error
 	DeleteStudyCycle(ctx context.Context, id string) error
+	GetActiveCycleWithItems(ctx context.Context) ([]database.GetActiveCycleWithItemsRow, error)
 }
 
 type StudyCycleManager struct {
@@ -79,4 +80,8 @@ func (s *StudyCycleManager) UpdateStudyCycle(ctx context.Context, id, name, desc
 
 func (s *StudyCycleManager) DeleteStudyCycle(ctx context.Context, id string) error {
 	return s.repo.DeleteStudyCycle(ctx, id)
+}
+
+func (s *StudyCycleManager) GetActiveCycleWithItems(ctx context.Context) ([]database.GetActiveCycleWithItemsRow, error) {
+	return s.repo.GetActiveCycleWithItems(ctx)
 }

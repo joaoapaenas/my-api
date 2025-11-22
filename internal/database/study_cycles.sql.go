@@ -54,6 +54,61 @@ func (q *Queries) DeleteStudyCycle(ctx context.Context, id string) error {
 	return err
 }
 
+const getActiveCycleWithItems = `-- name: GetActiveCycleWithItems :many
+SELECT 
+    ci.id AS cycle_item_id,
+    ci.order_index,
+    ci.planned_duration_minutes,
+    s.id AS subject_id,
+    s.name AS subject_name,
+    s.color_hex
+FROM cycle_items ci
+JOIN study_cycles sc ON ci.cycle_id = sc.id
+JOIN subjects s ON ci.subject_id = s.id
+WHERE sc.is_active = 1 
+  AND sc.deleted_at IS NULL
+ORDER BY ci.order_index ASC
+`
+
+type GetActiveCycleWithItemsRow struct {
+	CycleItemID            string         `json:"cycle_item_id"`
+	OrderIndex             int64          `json:"order_index"`
+	PlannedDurationMinutes sql.NullInt64  `json:"planned_duration_minutes"`
+	SubjectID              string         `json:"subject_id"`
+	SubjectName            string         `json:"subject_name"`
+	ColorHex               sql.NullString `json:"color_hex"`
+}
+
+func (q *Queries) GetActiveCycleWithItems(ctx context.Context) ([]GetActiveCycleWithItemsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getActiveCycleWithItems)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetActiveCycleWithItemsRow
+	for rows.Next() {
+		var i GetActiveCycleWithItemsRow
+		if err := rows.Scan(
+			&i.CycleItemID,
+			&i.OrderIndex,
+			&i.PlannedDurationMinutes,
+			&i.SubjectID,
+			&i.SubjectName,
+			&i.ColorHex,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getActiveStudyCycle = `-- name: GetActiveStudyCycle :one
 SELECT id, name, description, is_active, created_at, updated_at, deleted_at FROM study_cycles
 WHERE is_active = 1 AND deleted_at IS NULL

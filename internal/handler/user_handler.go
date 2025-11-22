@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +60,12 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 		// Log the real error internally (using slog in the future)
 		// log.Println(err)
+		slog.Error("Failed to create user",
+			"error", err,
+			"email", req.Email,
+			"path", r.URL.Path,
+		)
+
 		http.Error(w, "Failed to create user", http.StatusInternalServerError)
 		return
 	}

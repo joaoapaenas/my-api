@@ -8,20 +8,26 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/joaoapaenas/my-api/internal/service"
 )
 
 type UserHandler struct {
-	svc service.UserService // Depends on Service, not Database
+	svc      service.UserService
+	validate *validator.Validate
 }
 
 func NewUserHandler(svc service.UserService) *UserHandler {
-	return &UserHandler{svc: svc}
+	return &UserHandler{svc: svc, validate: validator.New()}
 }
 
 type CreateUserRequest struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	// required: cannot be empty
+	// email: must be a valid email format
+	Email string `json:"email" validate:"required,email"`
+
+	// min=2: must be at least 2 chars
+	Name string `json:"name" validate:"required,min=2"`
 }
 
 // CreateUser godoc
@@ -39,12 +45,17 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// 1. Decode & Basic Validation
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
-	if req.Email == "" || req.Name == "" {
-		http.Error(w, "Email and Name are required", http.StatusBadRequest)
+	if err := h.validate.Struct(req); err != nil {
+		// Return friendly validation errors
+		validationErrors := formatValidationErrors(err)
+		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "Validation failed",
+			"details": validationErrors,
+		})
 		return
 	}
 
@@ -54,25 +65,16 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Check for specific domain errors if you defined them
 		if errors.Is(err, service.ErrEmailTaken) {
-			http.Error(w, "Email already exists", http.StatusConflict)
+			h.respondWithError(w, http.StatusConflict, "Email already exists")
 			return
 		}
 
-		// Log the real error internally (using slog in the future)
-		// log.Println(err)
-		slog.Error("Failed to create user",
-			"error", err,
-			"email", req.Email,
-			"path", r.URL.Path,
-		)
-
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		slog.Error("Failed to create user", "error", err)
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	// 3. Response
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	h.respondWithJSON(w, http.StatusCreated, user)
 }
 
 // GetUser godoc
@@ -97,4 +99,37 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(user)
+}
+
+// --- Helpers ---
+
+func (h *UserHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func (h *UserHandler) respondWithError(w http.ResponseWriter, code int, message string) {
+	h.respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func formatValidationErrors(err error) map[string]string {
+	errors := make(map[string]string)
+	// Assert that it is a validator.ValidationErrors
+	if validationErrs, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range validationErrs {
+			// Simple message mapping
+			switch e.Tag() {
+			case "required":
+				errors[e.Field()] = "This field is required"
+			case "email":
+				errors[e.Field()] = "Invalid email format"
+			case "min":
+				errors[e.Field()] = "Must be at least " + e.Param() + " characters"
+			default:
+				errors[e.Field()] = "Invalid value"
+			}
+		}
+	}
+	return errors
 }

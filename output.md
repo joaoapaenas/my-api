@@ -197,20 +197,27 @@ sql:
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
+	"log/slog" // Use standard library structured logger
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/joaoapaenas/my-api/docs"
 	"github.com/joaoapaenas/my-api/internal/config"
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/handler"
+	"github.com/joaoapaenas/my-api/internal/logger" // Import your logger
+	"github.com/joaoapaenas/my-api/internal/service"
 
-	// USE THIS PURE GO DRIVER:
 	_ "github.com/glebarez/go-sqlite"
-
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
@@ -220,40 +227,92 @@ import (
 // @host localhost:8080
 // @BasePath /
 func main() {
-	cfg := config.Load()
+	// 1. Load Config
+	cfg, err := config.Load()
+	if err != nil {
+		// We use standard log here because logger isn't init'd yet
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
+	// 2. Initialize Logger
+	logger.Init(cfg.Env)
+	slog.Info("Starting application", "env", cfg.Env, "port", cfg.Port)
+
+	// 2. Database Connection
 	db, err := sql.Open("sqlite", cfg.DBUrl)
 	if err != nil {
-		log.Fatalf("Failed to open db: %v", err)
+		slog.Error("Failed to open db", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
-	// Basic check
 	if err := db.Ping(); err != nil {
-		log.Fatalf("Failed to ping db: %v", err)
+		slog.Error("Failed to ping db", "error", err)
+		os.Exit(1)
 	}
 
+	// 3. Wiring Layers
 	queries := database.New(db)
-	userHandler := handler.NewUserHandler(queries)
+	userService := service.NewUserManager(queries)
+	userHandler := handler.NewUserHandler(userService)
 
+	// 4. Router Setup
 	r := chi.NewRouter()
+	// middleware.Logger is okay for dev, but in prod we often rely on our own logging
+	r.Use(middleware.RequestID) // Adds a request ID to context (crucial for tracing)
+	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	// Documentation
+	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
+		doc := docs.SwaggerInfo.ReadDoc()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(doc))
+	})
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
+	// Routes
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
 	})
 
-	log.Printf("Server starting on :%s", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
-		log.Fatal(err)
+	// 5. Graceful Shutdown Configuration
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: r,
 	}
+
+	// Start Server in a Goroutine (so it doesn't block)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("Server failed to start", "error", err)
+			os.Exit(1)
+		}
+	}()
+	slog.Info("Server is ready to handle requests")
+
+	// 6. Wait for Interrupt Signal (Ctrl+C)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	// Block until signal is received
+	sig := <-quit
+	slog.Info("Shutting down server...", "signal", sig.String())
+
+	// Create a timeout context (wait 10s for running requests to finish)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("Server forced to shutdown", "error", err)
+	}
+
+	slog.Info("Server exited properly")
 }
 
 ```
@@ -650,8 +709,12 @@ swagger: "2.0"
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath" // Add this
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -661,14 +724,32 @@ type Config struct {
 	Timeout time.Duration
 }
 
-func Load() *Config {
-	// In production, use a library like kelseyhightower/envconfig
-	return &Config{
+func Load() (*Config, error) {
+	_ = godotenv.Load()
+
+	cfg := &Config{
 		Port:    getEnv("PORT", "8080"),
-		DBUrl:   getEnv("DB_URL", "./dev.db"),
+		DBUrl:   getEnv("DB_URL", ""),
 		Env:     getEnv("ENV", "development"),
 		Timeout: 5 * time.Second,
 	}
+
+	if cfg.DBUrl == "" {
+		if cfg.Env == "development" {
+			// FIX: Resolve absolute path to avoid "unable to open" errors on Windows
+			wd, _ := os.Getwd()
+			dbPath := filepath.Join(wd, "dev.db")
+
+			// FIX: Add Pragmas for Windows robustness
+			// _pragma=busy_timeout(5000): Wait 5s if db is locked (fixes "database is locked")
+			// _pragma=journal_mode(WAL): Better concurrency
+			cfg.DBUrl = fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+		} else {
+			return nil, fmt.Errorf("DB_URL environment variable is required")
+		}
+	}
+
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -836,24 +917,31 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/go-playground/validator/v10"
+	"github.com/joaoapaenas/my-api/internal/service"
 )
 
 type UserHandler struct {
-	repo database.Querier // Use the interface generated by sqlc
+	svc      service.UserService
+	validate *validator.Validate
 }
 
-func NewUserHandler(repo database.Querier) *UserHandler {
-	return &UserHandler{repo: repo}
+func NewUserHandler(svc service.UserService) *UserHandler {
+	return &UserHandler{svc: svc, validate: validator.New()}
 }
 
 type CreateUserRequest struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	// required: cannot be empty
+	// email: must be a valid email format
+	Email string `json:"email" validate:"required,email"`
+
+	// min=2: must be at least 2 chars
+	Name string `json:"name" validate:"required,min=2"`
 }
 
 // CreateUser godoc
@@ -864,31 +952,43 @@ type CreateUserRequest struct {
 // @Produce json
 // @Param input body CreateUserRequest true "User info"
 // @Success 201 {object} database.User
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Internal server error"
 // @Router /users [post]
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	// 1. Decode & Basic Validation
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
-	id := uuid.New().String()
+	if err := h.validate.Struct(req); err != nil {
+		// Return friendly validation errors
+		validationErrors := formatValidationErrors(err)
+		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "Validation failed",
+			"details": validationErrors,
+		})
+		return
+	}
 
-	// Always pass r.Context() for cancellation and timeouts
-	user, err := h.repo.CreateUser(r.Context(), database.CreateUserParams{
-		ID:    id,
-		Email: req.Email,
-		Name:  req.Name,
-	})
-
+	// 2. Call Service (Business Logic)
+	// Notice: We don't generate UUIDs here anymore.
+	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name)
 	if err != nil {
-		// Log the actual error internally here
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		// Check for specific domain errors if you defined them
+		if errors.Is(err, service.ErrEmailTaken) {
+			h.respondWithError(w, http.StatusConflict, "Email already exists")
+			return
+		}
+
+		slog.Error("Failed to create user", "error", err)
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	h.respondWithJSON(w, http.StatusCreated, user)
 }
 
 // GetUser godoc
@@ -896,13 +996,15 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 // @Tags users
 // @Param email path string true "User Email"
 // @Success 200 {object} database.User
+// @Failure 404 {string} string "User not found"
 // @Router /users/{email} [get]
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	email := chi.URLParam(r, "email")
 
-	user, err := h.repo.GetUserByEmail(r.Context(), email)
+	user, err := h.svc.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		// Handle "Not Found" specifically
+		if err == sql.ErrNoRows || errors.Is(err, service.ErrUserNotFound) {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
@@ -911,6 +1013,39 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(user)
+}
+
+// --- Helpers ---
+
+func (h *UserHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func (h *UserHandler) respondWithError(w http.ResponseWriter, code int, message string) {
+	h.respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func formatValidationErrors(err error) map[string]string {
+	errors := make(map[string]string)
+	// Assert that it is a validator.ValidationErrors
+	if validationErrs, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range validationErrs {
+			// Simple message mapping
+			switch e.Tag() {
+			case "required":
+				errors[e.Field()] = "This field is required"
+			case "email":
+				errors[e.Field()] = "Invalid email format"
+			case "min":
+				errors[e.Field()] = "Must be at least " + e.Param() + " characters"
+			default:
+				errors[e.Field()] = "Invalid value"
+			}
+		}
+	}
+	return errors
 }
 
 ```
@@ -957,6 +1092,105 @@ func TestGetUser_Validation(t *testing.T) {
 			_ = rr
 		})
 	}
+}
+
+```
+
+--- 
+
+**File:** `internal/logger/logger.go`
+
+```typescript
+package logger
+
+import (
+	"log/slog"
+	"os"
+)
+
+// Init configures the global logger.
+// env: "development" (text logs) or "production" (json logs)
+func Init(env string) {
+	var handler slog.Handler
+
+	opts := &slog.HandlerOptions{
+		Level: slog.LevelInfo, // Change to slog.LevelDebug for more verbosity
+	}
+
+	if env == "production" {
+		// JSON is machine-readable (required for AWS CloudWatch)
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		// Text is human-readable (nice for local dev)
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+}
+
+```
+
+--- 
+
+**File:** `internal/service/user_service.go`
+
+```typescript
+package service
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+	"github.com/joaoapaenas/my-api/internal/database"
+)
+
+var (
+	ErrUserNotFound = errors.New("user not found")
+	ErrEmailTaken   = errors.New("email already taken")
+)
+
+// UserService defines the business logic behavior
+type UserService interface {
+	CreateUser(ctx context.Context, email, name string) (database.User, error)
+	GetUserByEmail(ctx context.Context, email string) (database.User, error)
+}
+
+// UserManager implements UserService
+type UserManager struct {
+	repo database.Querier
+}
+
+func NewUserManager(repo database.Querier) *UserManager {
+	return &UserManager{repo: repo}
+}
+
+func (s *UserManager) CreateUser(ctx context.Context, email, name string) (database.User, error) {
+	// Logic: Generate UUID here, not in the handler
+	id := uuid.New().String()
+
+	user, err := s.repo.CreateUser(ctx, database.CreateUserParams{
+		ID:    id,
+		Email: email,
+		Name:  name,
+	})
+	if err != nil {
+		// In a real app, check for specific DB errors (like unique constraint violation)
+		// and return ErrEmailTaken. For now, we return the raw error.
+		return database.User{}, err
+	}
+	return user, nil
+}
+
+func (s *UserManager) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		// Assuming standard sql.ErrNoRows check happens here or in repo
+		// Ideally, you map sql.ErrNoRows -> ErrUserNotFound here
+		return database.User{}, err
+	}
+	return user, nil
 }
 
 ```

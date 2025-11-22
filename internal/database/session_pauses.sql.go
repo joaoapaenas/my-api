@@ -35,6 +35,16 @@ func (q *Queries) CreateSessionPause(ctx context.Context, arg CreateSessionPause
 	return i, err
 }
 
+const deleteSessionPause = `-- name: DeleteSessionPause :exec
+DELETE FROM session_pauses
+WHERE id = ?
+`
+
+func (q *Queries) DeleteSessionPause(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionPause, id)
+	return err
+}
+
 const endSessionPause = `-- name: EndSessionPause :exec
 UPDATE session_pauses
 SET ended_at = ?
@@ -49,4 +59,22 @@ type EndSessionPauseParams struct {
 func (q *Queries) EndSessionPause(ctx context.Context, arg EndSessionPauseParams) error {
 	_, err := q.db.ExecContext(ctx, endSessionPause, arg.EndedAt, arg.ID)
 	return err
+}
+
+const getSessionPause = `-- name: GetSessionPause :one
+SELECT id, session_id, started_at, ended_at, duration_seconds FROM session_pauses
+WHERE id = ?
+`
+
+func (q *Queries) GetSessionPause(ctx context.Context, id string) (SessionPause, error) {
+	row := q.db.QueryRowContext(ctx, getSessionPause, id)
+	var i SessionPause
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.DurationSeconds,
+	)
+	return i, err
 }

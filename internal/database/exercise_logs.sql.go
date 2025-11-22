@@ -46,3 +46,33 @@ func (q *Queries) CreateExerciseLog(ctx context.Context, arg CreateExerciseLogPa
 	)
 	return i, err
 }
+
+const deleteExerciseLog = `-- name: DeleteExerciseLog :exec
+DELETE FROM exercise_logs
+WHERE id = ?
+`
+
+func (q *Queries) DeleteExerciseLog(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteExerciseLog, id)
+	return err
+}
+
+const getExerciseLog = `-- name: GetExerciseLog :one
+SELECT id, session_id, subject_id, topic_id, questions_count, correct_count, created_at FROM exercise_logs
+WHERE id = ?
+`
+
+func (q *Queries) GetExerciseLog(ctx context.Context, id string) (ExerciseLog, error) {
+	row := q.db.QueryRowContext(ctx, getExerciseLog, id)
+	var i ExerciseLog
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.SubjectID,
+		&i.TopicID,
+		&i.QuestionsCount,
+		&i.CorrectCount,
+		&i.CreatedAt,
+	)
+	return i, err
+}

@@ -43,6 +43,17 @@ func (q *Queries) CreateStudyCycle(ctx context.Context, arg CreateStudyCyclePara
 	return i, err
 }
 
+const deleteStudyCycle = `-- name: DeleteStudyCycle :exec
+UPDATE study_cycles
+SET deleted_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) DeleteStudyCycle(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteStudyCycle, id)
+	return err
+}
+
 const getActiveStudyCycle = `-- name: GetActiveStudyCycle :one
 SELECT id, name, description, is_active, created_at, updated_at, deleted_at FROM study_cycles
 WHERE is_active = 1 AND deleted_at IS NULL
@@ -62,4 +73,47 @@ func (q *Queries) GetActiveStudyCycle(ctx context.Context) (StudyCycle, error) {
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const getStudyCycle = `-- name: GetStudyCycle :one
+SELECT id, name, description, is_active, created_at, updated_at, deleted_at FROM study_cycles
+WHERE id = ? AND deleted_at IS NULL
+`
+
+func (q *Queries) GetStudyCycle(ctx context.Context, id string) (StudyCycle, error) {
+	row := q.db.QueryRowContext(ctx, getStudyCycle, id)
+	var i StudyCycle
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const updateStudyCycle = `-- name: UpdateStudyCycle :exec
+UPDATE study_cycles
+SET name = ?, description = ?, is_active = ?, updated_at = datetime('now')
+WHERE id = ? AND deleted_at IS NULL
+`
+
+type UpdateStudyCycleParams struct {
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	IsActive    sql.NullInt64  `json:"is_active"`
+	ID          string         `json:"id"`
+}
+
+func (q *Queries) UpdateStudyCycle(ctx context.Context, arg UpdateStudyCycleParams) error {
+	_, err := q.db.ExecContext(ctx, updateStudyCycle,
+		arg.Name,
+		arg.Description,
+		arg.IsActive,
+		arg.ID,
+	)
+	return err
 }

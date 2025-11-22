@@ -35,6 +35,36 @@ func (q *Queries) CreateTopic(ctx context.Context, arg CreateTopicParams) (Topic
 	return i, err
 }
 
+const deleteTopic = `-- name: DeleteTopic :exec
+UPDATE topics
+SET deleted_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) DeleteTopic(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteTopic, id)
+	return err
+}
+
+const getTopic = `-- name: GetTopic :one
+SELECT id, subject_id, name, created_at, updated_at, deleted_at FROM topics
+WHERE id = ? AND deleted_at IS NULL
+`
+
+func (q *Queries) GetTopic(ctx context.Context, id string) (Topic, error) {
+	row := q.db.QueryRowContext(ctx, getTopic, id)
+	var i Topic
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const listTopicsBySubject = `-- name: ListTopicsBySubject :many
 SELECT id, subject_id, name, created_at, updated_at, deleted_at FROM topics
 WHERE subject_id = ? AND deleted_at IS NULL
@@ -69,4 +99,20 @@ func (q *Queries) ListTopicsBySubject(ctx context.Context, subjectID string) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateTopic = `-- name: UpdateTopic :exec
+UPDATE topics
+SET name = ?, updated_at = datetime('now')
+WHERE id = ? AND deleted_at IS NULL
+`
+
+type UpdateTopicParams struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+func (q *Queries) UpdateTopic(ctx context.Context, arg UpdateTopicParams) error {
+	_, err := q.db.ExecContext(ctx, updateTopic, arg.Name, arg.ID)
+	return err
 }

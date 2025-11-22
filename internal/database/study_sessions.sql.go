@@ -46,6 +46,39 @@ func (q *Queries) CreateStudySession(ctx context.Context, arg CreateStudySession
 	return i, err
 }
 
+const deleteStudySession = `-- name: DeleteStudySession :exec
+DELETE FROM study_sessions
+WHERE id = ?
+`
+
+func (q *Queries) DeleteStudySession(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteStudySession, id)
+	return err
+}
+
+const getStudySession = `-- name: GetStudySession :one
+SELECT id, subject_id, cycle_item_id, started_at, finished_at, gross_duration_seconds, net_duration_seconds, notes, created_at, updated_at FROM study_sessions
+WHERE id = ?
+`
+
+func (q *Queries) GetStudySession(ctx context.Context, id string) (StudySession, error) {
+	row := q.db.QueryRowContext(ctx, getStudySession, id)
+	var i StudySession
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectID,
+		&i.CycleItemID,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.GrossDurationSeconds,
+		&i.NetDurationSeconds,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSessionDuration = `-- name: UpdateSessionDuration :exec
 UPDATE study_sessions
 SET finished_at = ?, gross_duration_seconds = ?, net_duration_seconds = ?, notes = ?

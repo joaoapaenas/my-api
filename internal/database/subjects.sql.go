@@ -36,6 +36,36 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 	return i, err
 }
 
+const deleteSubject = `-- name: DeleteSubject :exec
+UPDATE subjects
+SET deleted_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) DeleteSubject(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteSubject, id)
+	return err
+}
+
+const getSubject = `-- name: GetSubject :one
+SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
+WHERE id = ? AND deleted_at IS NULL
+`
+
+func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, getSubject, id)
+	var i Subject
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ColorHex,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const listSubjects = `-- name: ListSubjects :many
 SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
 WHERE deleted_at IS NULL
@@ -70,4 +100,21 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateSubject = `-- name: UpdateSubject :exec
+UPDATE subjects
+SET name = ?, color_hex = ?, updated_at = datetime('now')
+WHERE id = ? AND deleted_at IS NULL
+`
+
+type UpdateSubjectParams struct {
+	Name     string         `json:"name"`
+	ColorHex sql.NullString `json:"color_hex"`
+	ID       string         `json:"id"`
+}
+
+func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) error {
+	_, err := q.db.ExecContext(ctx, updateSubject, arg.Name, arg.ColorHex, arg.ID)
+	return err
 }

@@ -17,13 +17,31 @@ type Querier interface {
 	CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error)
 	CreateTopic(ctx context.Context, arg CreateTopicParams) (Topic, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteCycleItem(ctx context.Context, id string) error
+	DeleteExerciseLog(ctx context.Context, id string) error
+	DeleteSessionPause(ctx context.Context, id string) error
+	DeleteStudyCycle(ctx context.Context, id string) error
+	DeleteStudySession(ctx context.Context, id string) error
+	DeleteSubject(ctx context.Context, id string) error
+	DeleteTopic(ctx context.Context, id string) error
 	EndSessionPause(ctx context.Context, arg EndSessionPauseParams) error
 	GetActiveStudyCycle(ctx context.Context) (StudyCycle, error)
+	GetCycleItem(ctx context.Context, id string) (CycleItem, error)
+	GetExerciseLog(ctx context.Context, id string) (ExerciseLog, error)
+	GetSessionPause(ctx context.Context, id string) (SessionPause, error)
+	GetStudyCycle(ctx context.Context, id string) (StudyCycle, error)
+	GetStudySession(ctx context.Context, id string) (StudySession, error)
+	GetSubject(ctx context.Context, id string) (Subject, error)
+	GetTopic(ctx context.Context, id string) (Topic, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	ListCycleItems(ctx context.Context, cycleID string) ([]CycleItem, error)
 	ListSubjects(ctx context.Context) ([]Subject, error)
 	ListTopicsBySubject(ctx context.Context, subjectID string) ([]Topic, error)
+	UpdateCycleItem(ctx context.Context, arg UpdateCycleItemParams) error
 	UpdateSessionDuration(ctx context.Context, arg UpdateSessionDurationParams) error
+	UpdateStudyCycle(ctx context.Context, arg UpdateStudyCycleParams) error
+	UpdateSubject(ctx context.Context, arg UpdateSubjectParams) error
+	UpdateTopic(ctx context.Context, arg UpdateTopicParams) error
 }
 
 var _ Querier = (*Queries)(nil)

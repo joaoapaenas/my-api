@@ -45,6 +45,36 @@ func (q *Queries) CreateCycleItem(ctx context.Context, arg CreateCycleItemParams
 	return i, err
 }
 
+const deleteCycleItem = `-- name: DeleteCycleItem :exec
+DELETE FROM cycle_items
+WHERE id = ?
+`
+
+func (q *Queries) DeleteCycleItem(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteCycleItem, id)
+	return err
+}
+
+const getCycleItem = `-- name: GetCycleItem :one
+SELECT id, cycle_id, subject_id, order_index, planned_duration_minutes, created_at, updated_at FROM cycle_items
+WHERE id = ?
+`
+
+func (q *Queries) GetCycleItem(ctx context.Context, id string) (CycleItem, error) {
+	row := q.db.QueryRowContext(ctx, getCycleItem, id)
+	var i CycleItem
+	err := row.Scan(
+		&i.ID,
+		&i.CycleID,
+		&i.SubjectID,
+		&i.OrderIndex,
+		&i.PlannedDurationMinutes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listCycleItems = `-- name: ListCycleItems :many
 SELECT id, cycle_id, subject_id, order_index, planned_duration_minutes, created_at, updated_at FROM cycle_items
 WHERE cycle_id = ?
@@ -80,4 +110,27 @@ func (q *Queries) ListCycleItems(ctx context.Context, cycleID string) ([]CycleIt
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateCycleItem = `-- name: UpdateCycleItem :exec
+UPDATE cycle_items
+SET subject_id = ?, order_index = ?, planned_duration_minutes = ?, updated_at = datetime('now')
+WHERE id = ?
+`
+
+type UpdateCycleItemParams struct {
+	SubjectID              string        `json:"subject_id"`
+	OrderIndex             int64         `json:"order_index"`
+	PlannedDurationMinutes sql.NullInt64 `json:"planned_duration_minutes"`
+	ID                     string        `json:"id"`
+}
+
+func (q *Queries) UpdateCycleItem(ctx context.Context, arg UpdateCycleItemParams) error {
+	_, err := q.db.ExecContext(ctx, updateCycleItem,
+		arg.SubjectID,
+		arg.OrderIndex,
+		arg.PlannedDurationMinutes,
+		arg.ID,
+	)
+	return err
 }

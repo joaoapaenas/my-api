@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/repository"
 )
 
 var (
@@ -21,10 +22,10 @@ type UserService interface {
 
 // UserManager implements UserService
 type UserManager struct {
-	repo database.Querier
+	repo repository.UserRepository
 }
 
-func NewUserManager(repo database.Querier) *UserManager {
+func NewUserManager(repo repository.UserRepository) *UserManager {
 	return &UserManager{repo: repo}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/handler"
 	"github.com/joaoapaenas/my-api/internal/logger"
+	"github.com/joaoapaenas/my-api/internal/repository"
 	"github.com/joaoapaenas/my-api/internal/service"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -58,7 +59,8 @@ func main() {
 
 	// 3. Wiring Layers
 	queries := database.New(db)
-	userService := service.NewUserManager(queries)
+	userRepo := repository.NewSQLUserRepository(queries)
+	userService := service.NewUserManager(userRepo)
 	userHandler := handler.NewUserHandler(userService)
 
 	// 4. Router Setup

@@ -9,8 +9,21 @@ import (
 )
 
 type Querier interface {
+	CreateCycleItem(ctx context.Context, arg CreateCycleItemParams) (CycleItem, error)
+	CreateExerciseLog(ctx context.Context, arg CreateExerciseLogParams) (ExerciseLog, error)
+	CreateSessionPause(ctx context.Context, arg CreateSessionPauseParams) (SessionPause, error)
+	CreateStudyCycle(ctx context.Context, arg CreateStudyCycleParams) (StudyCycle, error)
+	CreateStudySession(ctx context.Context, arg CreateStudySessionParams) (StudySession, error)
+	CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error)
+	CreateTopic(ctx context.Context, arg CreateTopicParams) (Topic, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	EndSessionPause(ctx context.Context, arg EndSessionPauseParams) error
+	GetActiveStudyCycle(ctx context.Context) (StudyCycle, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	ListCycleItems(ctx context.Context, cycleID string) ([]CycleItem, error)
+	ListSubjects(ctx context.Context) ([]Subject, error)
+	ListTopicsBySubject(ctx context.Context, subjectID string) ([]Topic, error)
+	UpdateSessionDuration(ctx context.Context, arg UpdateSessionDurationParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -5,8 +5,78 @@
 package database
 
 import (
+	"database/sql"
 	"time"
 )
+
+type CycleItem struct {
+	ID                     string        `json:"id"`
+	CycleID                string        `json:"cycle_id"`
+	SubjectID              string        `json:"subject_id"`
+	OrderIndex             int64         `json:"order_index"`
+	PlannedDurationMinutes sql.NullInt64 `json:"planned_duration_minutes"`
+	CreatedAt              string        `json:"created_at"`
+	UpdatedAt              string        `json:"updated_at"`
+}
+
+type ExerciseLog struct {
+	ID             string         `json:"id"`
+	SessionID      sql.NullString `json:"session_id"`
+	SubjectID      string         `json:"subject_id"`
+	TopicID        sql.NullString `json:"topic_id"`
+	QuestionsCount int64          `json:"questions_count"`
+	CorrectCount   int64          `json:"correct_count"`
+	CreatedAt      string         `json:"created_at"`
+}
+
+type SessionPause struct {
+	ID              string         `json:"id"`
+	SessionID       string         `json:"session_id"`
+	StartedAt       string         `json:"started_at"`
+	EndedAt         sql.NullString `json:"ended_at"`
+	DurationSeconds sql.NullInt64  `json:"duration_seconds"`
+}
+
+type StudyCycle struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	IsActive    sql.NullInt64  `json:"is_active"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+	DeletedAt   sql.NullString `json:"deleted_at"`
+}
+
+type StudySession struct {
+	ID                   string         `json:"id"`
+	SubjectID            string         `json:"subject_id"`
+	CycleItemID          sql.NullString `json:"cycle_item_id"`
+	StartedAt            string         `json:"started_at"`
+	FinishedAt           sql.NullString `json:"finished_at"`
+	GrossDurationSeconds sql.NullInt64  `json:"gross_duration_seconds"`
+	NetDurationSeconds   sql.NullInt64  `json:"net_duration_seconds"`
+	Notes                sql.NullString `json:"notes"`
+	CreatedAt            string         `json:"created_at"`
+	UpdatedAt            string         `json:"updated_at"`
+}
+
+type Subject struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	ColorHex  sql.NullString `json:"color_hex"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+	DeletedAt sql.NullString `json:"deleted_at"`
+}
+
+type Topic struct {
+	ID        string         `json:"id"`
+	SubjectID string         `json:"subject_id"`
+	Name      string         `json:"name"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+	DeletedAt sql.NullString `json:"deleted_at"`
+}
 
 type User struct {
 	ID        string    `json:"id"`

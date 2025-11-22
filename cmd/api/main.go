@@ -60,6 +60,7 @@ func main() {
 	// 3. Wiring Layers
 	queries := database.New(db)
 	userRepo := repository.NewSQLUserRepository(queries)
+	_ = repository.NewSQLStudyRepository(queries) // Initialized but unused for now
 	userService := service.NewUserManager(userRepo)
 	userHandler := handler.NewUserHandler(userService)
 

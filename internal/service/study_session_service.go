@@ -12,6 +12,8 @@ import (
 type StudySessionService interface {
 	CreateStudySession(ctx context.Context, subjectID, cycleItemID, startedAt string) (database.StudySession, error)
 	UpdateSessionDuration(ctx context.Context, id, finishedAt string, grossSeconds, netSeconds int, notes string) error
+	GetStudySession(ctx context.Context, id string) (database.StudySession, error)
+	DeleteStudySession(ctx context.Context, id string) error
 }
 
 type StudySessionManager struct {
@@ -66,4 +68,12 @@ func (s *StudySessionManager) UpdateSessionDuration(ctx context.Context, id, fin
 		Notes:                sessionNotes,
 		ID:                   id,
 	})
+}
+
+func (s *StudySessionManager) GetStudySession(ctx context.Context, id string) (database.StudySession, error) {
+	return s.repo.GetStudySession(ctx, id)
+}
+
+func (s *StudySessionManager) DeleteStudySession(ctx context.Context, id string) error {
+	return s.repo.DeleteStudySession(ctx, id)
 }

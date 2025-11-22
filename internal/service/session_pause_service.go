@@ -12,6 +12,8 @@ import (
 type SessionPauseService interface {
 	CreateSessionPause(ctx context.Context, sessionID, startedAt string) (database.SessionPause, error)
 	EndSessionPause(ctx context.Context, id, endedAt string) error
+	GetSessionPause(ctx context.Context, id string) (database.SessionPause, error)
+	DeleteSessionPause(ctx context.Context, id string) error
 }
 
 type SessionPauseManager struct {
@@ -41,4 +43,12 @@ func (s *SessionPauseManager) EndSessionPause(ctx context.Context, id, endedAt s
 		EndedAt: ended,
 		ID:      id,
 	})
+}
+
+func (s *SessionPauseManager) GetSessionPause(ctx context.Context, id string) (database.SessionPause, error) {
+	return s.repo.GetSessionPause(ctx, id)
+}
+
+func (s *SessionPauseManager) DeleteSessionPause(ctx context.Context, id string) error {
+	return s.repo.DeleteSessionPause(ctx, id)
 }

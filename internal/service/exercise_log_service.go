@@ -11,6 +11,8 @@ import (
 
 type ExerciseLogService interface {
 	CreateExerciseLog(ctx context.Context, sessionID, subjectID, topicID string, questionsCount, correctCount int) (database.ExerciseLog, error)
+	GetExerciseLog(ctx context.Context, id string) (database.ExerciseLog, error)
+	DeleteExerciseLog(ctx context.Context, id string) error
 }
 
 type ExerciseLogManager struct {
@@ -42,4 +44,12 @@ func (s *ExerciseLogManager) CreateExerciseLog(ctx context.Context, sessionID, s
 		QuestionsCount: int64(questionsCount),
 		CorrectCount:   int64(correctCount),
 	})
+}
+
+func (s *ExerciseLogManager) GetExerciseLog(ctx context.Context, id string) (database.ExerciseLog, error) {
+	return s.repo.GetExerciseLog(ctx, id)
+}
+
+func (s *ExerciseLogManager) DeleteExerciseLog(ctx context.Context, id string) error {
+	return s.repo.DeleteExerciseLog(ctx, id)
 }

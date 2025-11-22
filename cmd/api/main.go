@@ -115,29 +115,53 @@ func main() {
 	r.Route("/subjects", func(r chi.Router) {
 		r.Post("/", subjectHandler.CreateSubject)
 		r.Get("/", subjectHandler.ListSubjects)
+		r.Get("/{id}", subjectHandler.GetSubject)
+		r.Put("/{id}", subjectHandler.UpdateSubject)
+		r.Delete("/{id}", subjectHandler.DeleteSubject)
 		r.Post("/{id}/topics", topicHandler.CreateTopic)
 		r.Get("/{id}/topics", topicHandler.ListTopics)
+	})
+
+	r.Route("/topics", func(r chi.Router) {
+		r.Get("/{id}", topicHandler.GetTopic)
+		r.Put("/{id}", topicHandler.UpdateTopic)
+		r.Delete("/{id}", topicHandler.DeleteTopic)
 	})
 
 	r.Route("/study-cycles", func(r chi.Router) {
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
+		r.Get("/{id}", studyCycleHandler.GetStudyCycle)
+		r.Put("/{id}", studyCycleHandler.UpdateStudyCycle)
+		r.Delete("/{id}", studyCycleHandler.DeleteStudyCycle)
 		r.Post("/{id}/items", cycleItemHandler.CreateCycleItem)
 		r.Get("/{id}/items", cycleItemHandler.ListCycleItems)
 	})
 
+	r.Route("/cycle-items", func(r chi.Router) {
+		r.Get("/{id}", cycleItemHandler.GetCycleItem)
+		r.Put("/{id}", cycleItemHandler.UpdateCycleItem)
+		r.Delete("/{id}", cycleItemHandler.DeleteCycleItem)
+	})
+
 	r.Route("/study-sessions", func(r chi.Router) {
 		r.Post("/", studySessionHandler.CreateStudySession)
+		r.Get("/{id}", studySessionHandler.GetStudySession)
 		r.Put("/{id}", studySessionHandler.UpdateSessionDuration)
+		r.Delete("/{id}", studySessionHandler.DeleteStudySession)
 	})
 
 	r.Route("/session-pauses", func(r chi.Router) {
 		r.Post("/", sessionPauseHandler.CreateSessionPause)
+		r.Get("/{id}", sessionPauseHandler.GetSessionPause)
 		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
+		r.Delete("/{id}", sessionPauseHandler.DeleteSessionPause)
 	})
 
 	r.Route("/exercise-logs", func(r chi.Router) {
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
+		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
+		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
 	})
 
 	// 5. Server

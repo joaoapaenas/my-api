@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/joaoapaenas/my-api/internal/service"
 )
@@ -18,6 +19,11 @@ func NewSubjectHandler(svc service.SubjectService) *SubjectHandler {
 }
 
 type CreateSubjectRequest struct {
+	Name     string `json:"name" validate:"required,min=2"`
+	ColorHex string `json:"color_hex" validate:"omitempty,hexcolor"`
+}
+
+type UpdateSubjectRequest struct {
 	Name     string `json:"name" validate:"required,min=2"`
 	ColorHex string `json:"color_hex" validate:"omitempty,hexcolor"`
 }
@@ -68,6 +74,90 @@ func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.respondWithJSON(w, http.StatusOK, subjects)
+}
+
+// GetSubject godoc
+// @Summary Get a subject by ID
+// @Tags subjects
+// @Produce json
+// @Param id path string true "Subject ID"
+// @Success 200 {object} database.Subject
+// @Router /subjects/{id} [get]
+func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
+		return
+	}
+
+	subject, err := h.svc.GetSubject(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusNotFound, "Subject not found")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, subject)
+}
+
+// UpdateSubject godoc
+// @Summary Update a subject
+// @Tags subjects
+// @Accept json
+// @Produce json
+// @Param id path string true "Subject ID"
+// @Param input body UpdateSubjectRequest true "Subject info"
+// @Success 200 {string} string "OK"
+// @Router /subjects/{id} [put]
+func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
+		return
+	}
+
+	var req UpdateSubjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if err := h.validate.Struct(req); err != nil {
+		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "Validation failed",
+			"details": formatValidationErrors(err),
+		})
+		return
+	}
+
+	err := h.svc.UpdateSubject(r.Context(), id, req.Name, req.ColorHex)
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, map[string]string{"message": "Subject updated successfully"})
+}
+
+// DeleteSubject godoc
+// @Summary Delete a subject
+// @Tags subjects
+// @Param id path string true "Subject ID"
+// @Success 204
+// @Router /subjects/{id} [delete]
+func (h *SubjectHandler) DeleteSubject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
+		return
+	}
+
+	err := h.svc.DeleteSubject(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SubjectHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

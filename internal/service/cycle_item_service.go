@@ -12,6 +12,9 @@ import (
 type CycleItemService interface {
 	CreateCycleItem(ctx context.Context, cycleID, subjectID string, orderIndex int, plannedDurationMinutes int) (database.CycleItem, error)
 	ListCycleItems(ctx context.Context, cycleID string) ([]database.CycleItem, error)
+	GetCycleItem(ctx context.Context, id string) (database.CycleItem, error)
+	UpdateCycleItem(ctx context.Context, id, subjectID string, orderIndex int, plannedDurationMinutes int) error
+	DeleteCycleItem(ctx context.Context, id string) error
 }
 
 type CycleItemManager struct {
@@ -41,4 +44,26 @@ func (s *CycleItemManager) CreateCycleItem(ctx context.Context, cycleID, subject
 
 func (s *CycleItemManager) ListCycleItems(ctx context.Context, cycleID string) ([]database.CycleItem, error) {
 	return s.repo.ListCycleItems(ctx, cycleID)
+}
+
+func (s *CycleItemManager) GetCycleItem(ctx context.Context, id string) (database.CycleItem, error) {
+	return s.repo.GetCycleItem(ctx, id)
+}
+
+func (s *CycleItemManager) UpdateCycleItem(ctx context.Context, id, subjectID string, orderIndex int, plannedDurationMinutes int) error {
+	var duration sql.NullInt64
+	if plannedDurationMinutes > 0 {
+		duration = sql.NullInt64{Int64: int64(plannedDurationMinutes), Valid: true}
+	}
+
+	return s.repo.UpdateCycleItem(ctx, database.UpdateCycleItemParams{
+		SubjectID:              subjectID,
+		OrderIndex:             int64(orderIndex),
+		PlannedDurationMinutes: duration,
+		ID:                     id,
+	})
+}
+
+func (s *CycleItemManager) DeleteCycleItem(ctx context.Context, id string) error {
+	return s.repo.DeleteCycleItem(ctx, id)
 }

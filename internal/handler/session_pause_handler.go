@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/joaoapaenas/my-api/internal/service"
 )
@@ -58,6 +59,29 @@ func (h *SessionPauseHandler) CreateSessionPause(w http.ResponseWriter, r *http.
 	h.respondWithJSON(w, http.StatusCreated, pause)
 }
 
+// GetSessionPause godoc
+// @Summary Get a session pause by ID
+// @Tags session_pauses
+// @Produce json
+// @Param id path string true "Pause ID"
+// @Success 200 {object} database.SessionPause
+// @Router /session-pauses/{id} [get]
+func (h *SessionPauseHandler) GetSessionPause(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Pause ID is required")
+		return
+	}
+
+	pause, err := h.svc.GetSessionPause(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusNotFound, "Session pause not found")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, pause)
+}
+
 // EndSessionPause godoc
 // @Summary End a session pause
 // @Tags session_pauses
@@ -68,8 +92,8 @@ func (h *SessionPauseHandler) CreateSessionPause(w http.ResponseWriter, r *http.
 // @Success 200 {string} string "OK"
 // @Router /session-pauses/{id}/end [put]
 func (h *SessionPauseHandler) EndSessionPause(w http.ResponseWriter, r *http.Request) {
-	pauseID := r.URL.Query().Get("id")
-	if pauseID == "" {
+	id := chi.URLParam(r, "id")
+	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Pause ID is required")
 		return
 	}
@@ -88,13 +112,35 @@ func (h *SessionPauseHandler) EndSessionPause(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err := h.svc.EndSessionPause(r.Context(), pauseID, req.EndedAt)
+	err := h.svc.EndSessionPause(r.Context(), id, req.EndedAt)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	h.respondWithJSON(w, http.StatusOK, map[string]string{"message": "Pause ended successfully"})
+}
+
+// DeleteSessionPause godoc
+// @Summary Delete a session pause
+// @Tags session_pauses
+// @Param id path string true "Pause ID"
+// @Success 204
+// @Router /session-pauses/{id} [delete]
+func (h *SessionPauseHandler) DeleteSessionPause(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Pause ID is required")
+		return
+	}
+
+	err := h.svc.DeleteSessionPause(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SessionPauseHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/joaoapaenas/my-api/internal/service"
 )
@@ -48,7 +49,6 @@ func (h *ExerciseLogHandler) CreateExerciseLog(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Validate that correct_count <= questions_count
 	if req.CorrectCount > req.QuestionsCount {
 		h.respondWithError(w, http.StatusBadRequest, "Correct count cannot exceed questions count")
 		return
@@ -61,6 +61,51 @@ func (h *ExerciseLogHandler) CreateExerciseLog(w http.ResponseWriter, r *http.Re
 	}
 
 	h.respondWithJSON(w, http.StatusCreated, log)
+}
+
+// GetExerciseLog godoc
+// @Summary Get an exercise log by ID
+// @Tags exercise_logs
+// @Produce json
+// @Param id path string true "Log ID"
+// @Success 200 {object} database.ExerciseLog
+// @Router /exercise-logs/{id} [get]
+func (h *ExerciseLogHandler) GetExerciseLog(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Log ID is required")
+		return
+	}
+
+	log, err := h.svc.GetExerciseLog(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusNotFound, "Exercise log not found")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, log)
+}
+
+// DeleteExerciseLog godoc
+// @Summary Delete an exercise log
+// @Tags exercise_logs
+// @Param id path string true "Log ID"
+// @Success 204
+// @Router /exercise-logs/{id} [delete]
+func (h *ExerciseLogHandler) DeleteExerciseLog(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Log ID is required")
+		return
+	}
+
+	err := h.svc.DeleteExerciseLog(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *ExerciseLogHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

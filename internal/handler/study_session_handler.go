@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/joaoapaenas/my-api/internal/service"
 )
@@ -62,6 +63,29 @@ func (h *StudySessionHandler) CreateStudySession(w http.ResponseWriter, r *http.
 	h.respondWithJSON(w, http.StatusCreated, session)
 }
 
+// GetStudySession godoc
+// @Summary Get a study session by ID
+// @Tags study_sessions
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {object} database.StudySession
+// @Router /study-sessions/{id} [get]
+func (h *StudySessionHandler) GetStudySession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Session ID is required")
+		return
+	}
+
+	session, err := h.svc.GetStudySession(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusNotFound, "Study session not found")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, session)
+}
+
 // UpdateSessionDuration godoc
 // @Summary Update study session duration
 // @Tags study_sessions
@@ -72,8 +96,8 @@ func (h *StudySessionHandler) CreateStudySession(w http.ResponseWriter, r *http.
 // @Success 200 {string} string "OK"
 // @Router /study-sessions/{id} [put]
 func (h *StudySessionHandler) UpdateSessionDuration(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("id")
-	if sessionID == "" {
+	id := chi.URLParam(r, "id")
+	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Session ID is required")
 		return
 	}
@@ -84,13 +108,35 @@ func (h *StudySessionHandler) UpdateSessionDuration(w http.ResponseWriter, r *ht
 		return
 	}
 
-	err := h.svc.UpdateSessionDuration(r.Context(), sessionID, req.FinishedAt, req.GrossDurationSeconds, req.NetDurationSeconds, req.Notes)
+	err := h.svc.UpdateSessionDuration(r.Context(), id, req.FinishedAt, req.GrossDurationSeconds, req.NetDurationSeconds, req.Notes)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	h.respondWithJSON(w, http.StatusOK, map[string]string{"message": "Session updated successfully"})
+}
+
+// DeleteStudySession godoc
+// @Summary Delete a study session
+// @Tags study_sessions
+// @Param id path string true "Session ID"
+// @Success 204
+// @Router /study-sessions/{id} [delete]
+func (h *StudySessionHandler) DeleteStudySession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.respondWithError(w, http.StatusBadRequest, "Session ID is required")
+		return
+	}
+
+	err := h.svc.DeleteStudySession(r.Context(), id)
+	if err != nil {
+		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *StudySessionHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

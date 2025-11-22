@@ -64,16 +64,31 @@ func main() {
 	userRepo := repository.NewSQLUserRepository(queries)
 	subjectRepo := repository.NewSQLSubjectRepository(queries)
 	topicRepo := repository.NewSQLTopicRepository(queries)
+	studyCycleRepo := repository.NewSQLStudyCycleRepository(queries)
+	cycleItemRepo := repository.NewSQLCycleItemRepository(queries)
+	studySessionRepo := repository.NewSQLStudySessionRepository(queries)
+	sessionPauseRepo := repository.NewSQLSessionPauseRepository(queries)
+	exerciseLogRepo := repository.NewSQLExerciseLogRepository(queries)
 
 	// Services
 	userService := service.NewUserManager(userRepo)
 	subjectService := service.NewSubjectManager(subjectRepo)
 	topicService := service.NewTopicManager(topicRepo)
+	studyCycleService := service.NewStudyCycleManager(studyCycleRepo)
+	cycleItemService := service.NewCycleItemManager(cycleItemRepo)
+	studySessionService := service.NewStudySessionManager(studySessionRepo)
+	sessionPauseService := service.NewSessionPauseManager(sessionPauseRepo)
+	exerciseLogService := service.NewExerciseLogManager(exerciseLogRepo)
 
 	// Handlers
 	userHandler := handler.NewUserHandler(userService)
 	subjectHandler := handler.NewSubjectHandler(subjectService)
 	topicHandler := handler.NewTopicHandler(topicService)
+	studyCycleHandler := handler.NewStudyCycleHandler(studyCycleService)
+	cycleItemHandler := handler.NewCycleItemHandler(cycleItemService)
+	studySessionHandler := handler.NewStudySessionHandler(studySessionService)
+	sessionPauseHandler := handler.NewSessionPauseHandler(sessionPauseService)
+	exerciseLogHandler := handler.NewExerciseLogHandler(exerciseLogService)
 
 	// 4. Router Setup
 	r := chi.NewRouter()
@@ -102,6 +117,27 @@ func main() {
 		r.Get("/", subjectHandler.ListSubjects)
 		r.Post("/{id}/topics", topicHandler.CreateTopic)
 		r.Get("/{id}/topics", topicHandler.ListTopics)
+	})
+
+	r.Route("/study-cycles", func(r chi.Router) {
+		r.Post("/", studyCycleHandler.CreateStudyCycle)
+		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
+		r.Post("/{id}/items", cycleItemHandler.CreateCycleItem)
+		r.Get("/{id}/items", cycleItemHandler.ListCycleItems)
+	})
+
+	r.Route("/study-sessions", func(r chi.Router) {
+		r.Post("/", studySessionHandler.CreateStudySession)
+		r.Put("/{id}", studySessionHandler.UpdateSessionDuration)
+	})
+
+	r.Route("/session-pauses", func(r chi.Router) {
+		r.Post("/", sessionPauseHandler.CreateSessionPause)
+		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
+	})
+
+	r.Route("/exercise-logs", func(r chi.Router) {
+		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 	})
 
 	// 5. Server

@@ -59,10 +59,21 @@ func main() {
 
 	// 3. Wiring Layers
 	queries := database.New(db)
+
+	// Repositories
 	userRepo := repository.NewSQLUserRepository(queries)
-	_ = repository.NewSQLStudyRepository(queries) // Initialized but unused for now
+	subjectRepo := repository.NewSQLSubjectRepository(queries)
+	topicRepo := repository.NewSQLTopicRepository(queries)
+
+	// Services
 	userService := service.NewUserManager(userRepo)
+	subjectService := service.NewSubjectManager(subjectRepo)
+	topicService := service.NewTopicManager(topicRepo)
+
+	// Handlers
 	userHandler := handler.NewUserHandler(userService)
+	subjectHandler := handler.NewSubjectHandler(subjectService)
+	topicHandler := handler.NewTopicHandler(topicService)
 
 	// 4. Router Setup
 	r := chi.NewRouter()
@@ -84,6 +95,13 @@ func main() {
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
+	})
+
+	r.Route("/subjects", func(r chi.Router) {
+		r.Post("/", subjectHandler.CreateSubject)
+		r.Get("/", subjectHandler.ListSubjects)
+		r.Post("/{id}/topics", topicHandler.CreateTopic)
+		r.Get("/{id}/topics", topicHandler.ListTopics)
 	})
 
 	// 5. Server

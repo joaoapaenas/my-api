@@ -1,0 +1,9 @@
+-- name: CreateCycleItem :one
+INSERT INTO cycle_items (id, cycle_id, subject_id, order_index, planned_duration_minutes)
+VALUES (?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListCycleItems :many
+SELECT * FROM cycle_items
+WHERE cycle_id = ?
+ORDER BY order_index;

@@ -11,12 +11,278 @@ definitions:
       name:
         type: string
     type: object
+  handler.CreateCycleItemRequest:
+    properties:
+      order_index:
+        minimum: 1
+        type: integer
+      planned_duration_minutes:
+        minimum: 1
+        type: integer
+      subject_id:
+        type: string
+    required:
+    - order_index
+    - subject_id
+    type: object
+  handler.CreateExerciseLogRequest:
+    properties:
+      correct_count:
+        minimum: 0
+        type: integer
+      questions_count:
+        minimum: 0
+        type: integer
+      session_id:
+        type: string
+      subject_id:
+        type: string
+      topic_id:
+        type: string
+    required:
+    - correct_count
+    - questions_count
+    - subject_id
+    type: object
+  handler.CreateSessionPauseRequest:
+    properties:
+      session_id:
+        type: string
+      started_at:
+        type: string
+    required:
+    - session_id
+    - started_at
+    type: object
+  handler.CreateStudyCycleRequest:
+    properties:
+      description:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
+  handler.CreateStudySessionRequest:
+    properties:
+      cycle_item_id:
+        type: string
+      started_at:
+        type: string
+      subject_id:
+        type: string
+    required:
+    - started_at
+    - subject_id
+    type: object
+  handler.CreateSubjectRequest:
+    properties:
+      color_hex:
+        type: string
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
+  handler.CreateTopicRequest:
+    properties:
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
   handler.CreateUserRequest:
     properties:
       email:
+        description: |-
+          required: cannot be empty
+          email: must be a valid email format
+        type: string
+      name:
+        description: 'min=2: must be at least 2 chars'
+        minLength: 2
+        type: string
+    required:
+    - email
+    - name
+    type: object
+  handler.CycleItemResponse:
+    properties:
+      created_at:
+        type: string
+      cycle_id:
+        type: string
+      id:
+        type: string
+      order_index:
+        type: integer
+      planned_duration_minutes:
+        type: integer
+      subject_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handler.EndSessionPauseRequest:
+    properties:
+      ended_at:
+        type: string
+    required:
+    - ended_at
+    type: object
+  handler.ExerciseLogResponse:
+    properties:
+      correct_count:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      questions_count:
+        type: integer
+      session_id:
+        type: string
+      subject_id:
+        type: string
+      topic_id:
+        type: string
+    type: object
+  handler.SessionPauseResponse:
+    properties:
+      ended_at:
+        type: string
+      id:
+        type: string
+      session_id:
+        type: string
+      started_at:
+        type: string
+    type: object
+  handler.StudyCycleResponse:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: integer
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handler.StudySessionResponse:
+    properties:
+      cycle_item_id:
+        type: string
+      finished_at:
+        type: string
+      gross_duration_seconds:
+        type: integer
+      id:
+        type: string
+      net_duration_seconds:
+        type: integer
+      notes:
+        type: string
+      started_at:
+        type: string
+      subject_id:
+        type: string
+    type: object
+  handler.SubjectResponse:
+    properties:
+      color_hex:
+        type: string
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      id:
         type: string
       name:
         type: string
+      updated_at:
+        type: string
+    type: object
+  handler.TopicResponse:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      subject_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handler.UpdateCycleItemRequest:
+    properties:
+      order_index:
+        minimum: 1
+        type: integer
+      planned_duration_minutes:
+        minimum: 1
+        type: integer
+      subject_id:
+        type: string
+    required:
+    - order_index
+    - subject_id
+    type: object
+  handler.UpdateSessionDurationRequest:
+    properties:
+      finished_at:
+        type: string
+      gross_duration_seconds:
+        type: integer
+      net_duration_seconds:
+        type: integer
+      notes:
+        type: string
+    type: object
+  handler.UpdateStudyCycleRequest:
+    properties:
+      description:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
+  handler.UpdateSubjectRequest:
+    properties:
+      color_hex:
+        type: string
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
+  handler.UpdateTopicRequest:
+    properties:
+      name:
+        minLength: 2
+        type: string
+    required:
+    - name
     type: object
 host: localhost:8080
 info:
@@ -25,6 +291,594 @@ info:
   title: My Go API
   version: "1.0"
 paths:
+  /cycle-items/{id}:
+    delete:
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a cycle item
+      tags:
+      - cycle_items
+    get:
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.CycleItemResponse'
+      summary: Get a cycle item by ID
+      tags:
+      - cycle_items
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Cycle item info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateCycleItemRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update a cycle item
+      tags:
+      - cycle_items
+  /exercise-logs:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Exercise log info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateExerciseLogRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.ExerciseLogResponse'
+      summary: Create a new exercise log
+      tags:
+      - exercise_logs
+  /exercise-logs/{id}:
+    delete:
+      parameters:
+      - description: Log ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete an exercise log
+      tags:
+      - exercise_logs
+    get:
+      parameters:
+      - description: Log ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ExerciseLogResponse'
+      summary: Get an exercise log by ID
+      tags:
+      - exercise_logs
+  /session-pauses:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Session pause info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateSessionPauseRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.SessionPauseResponse'
+      summary: Create a new session pause
+      tags:
+      - session_pauses
+  /session-pauses/{id}:
+    delete:
+      parameters:
+      - description: Pause ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a session pause
+      tags:
+      - session_pauses
+    get:
+      parameters:
+      - description: Pause ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SessionPauseResponse'
+      summary: Get a session pause by ID
+      tags:
+      - session_pauses
+  /session-pauses/{id}/end:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pause ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: End pause info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.EndSessionPauseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: End a session pause
+      tags:
+      - session_pauses
+  /study-cycles:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Study cycle info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateStudyCycleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.StudyCycleResponse'
+      summary: Create a new study cycle
+      tags:
+      - study_cycles
+  /study-cycles/{id}:
+    delete:
+      parameters:
+      - description: Cycle ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a study cycle
+      tags:
+      - study_cycles
+    get:
+      parameters:
+      - description: Cycle ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.StudyCycleResponse'
+      summary: Get a study cycle by ID
+      tags:
+      - study_cycles
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Cycle ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Study cycle info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateStudyCycleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update a study cycle
+      tags:
+      - study_cycles
+  /study-cycles/{id}/items:
+    get:
+      parameters:
+      - description: Cycle ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.CycleItemResponse'
+            type: array
+      summary: List all items for a cycle
+      tags:
+      - cycle_items
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Cycle ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Cycle item info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateCycleItemRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.CycleItemResponse'
+      summary: Create a new cycle item
+      tags:
+      - cycle_items
+  /study-cycles/active:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.StudyCycleResponse'
+      summary: Get the active study cycle
+      tags:
+      - study_cycles
+  /study-sessions:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Study session info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateStudySessionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.StudySessionResponse'
+      summary: Create a new study session
+      tags:
+      - study_sessions
+  /study-sessions/{id}:
+    delete:
+      parameters:
+      - description: Session ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a study session
+      tags:
+      - study_sessions
+    get:
+      parameters:
+      - description: Session ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.StudySessionResponse'
+      summary: Get a study session by ID
+      tags:
+      - study_sessions
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Session ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session duration info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateSessionDurationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update study session duration
+      tags:
+      - study_sessions
+  /subjects:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.SubjectResponse'
+            type: array
+      summary: List all subjects
+      tags:
+      - subjects
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Subject info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateSubjectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.SubjectResponse'
+      summary: Create a new subject
+      tags:
+      - subjects
+  /subjects/{id}:
+    delete:
+      parameters:
+      - description: Subject ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a subject
+      tags:
+      - subjects
+    get:
+      parameters:
+      - description: Subject ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SubjectResponse'
+      summary: Get a subject by ID
+      tags:
+      - subjects
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Subject ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Subject info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateSubjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update a subject
+      tags:
+      - subjects
+  /subjects/{id}/topics:
+    get:
+      parameters:
+      - description: Subject ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TopicResponse'
+            type: array
+      summary: List all topics for a subject
+      tags:
+      - topics
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Subject ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Topic info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateTopicRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.TopicResponse'
+      summary: Create a new topic for a subject
+      tags:
+      - topics
+  /topics/{id}:
+    delete:
+      parameters:
+      - description: Topic ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Delete a topic
+      tags:
+      - topics
+    get:
+      parameters:
+      - description: Topic ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.TopicResponse'
+      summary: Get a topic by ID
+      tags:
+      - topics
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Topic ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Topic info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateTopicRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update a topic
+      tags:
+      - topics
   /users:
     post:
       consumes:
@@ -44,6 +898,14 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/database.User'
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
       summary: Create a new user
       tags:
       - users
@@ -60,6 +922,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/database.User'
+        "404":
+          description: User not found
+          schema:
+            type: string
       summary: Get user by Email
       tags:
       - users

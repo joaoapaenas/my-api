@@ -37,7 +37,7 @@ type UpdateSessionDurationRequest struct {
 // @Accept json
 // @Produce json
 // @Param input body CreateStudySessionRequest true "Study session info"
-// @Success 201 {object} database.StudySession
+// @Success 201 {object} handler.StudySessionResponse
 // @Router /study-sessions [post]
 func (h *StudySessionHandler) CreateStudySession(w http.ResponseWriter, r *http.Request) {
 	var req CreateStudySessionRequest
@@ -68,7 +68,7 @@ func (h *StudySessionHandler) CreateStudySession(w http.ResponseWriter, r *http.
 // @Tags study_sessions
 // @Produce json
 // @Param id path string true "Session ID"
-// @Success 200 {object} database.StudySession
+// @Success 200 {object} handler.StudySessionResponse
 // @Router /study-sessions/{id} [get]
 func (h *StudySessionHandler) GetStudySession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

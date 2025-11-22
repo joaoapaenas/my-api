@@ -32,7 +32,7 @@ type CreateExerciseLogRequest struct {
 // @Accept json
 // @Produce json
 // @Param input body CreateExerciseLogRequest true "Exercise log info"
-// @Success 201 {object} database.ExerciseLog
+// @Success 201 {object} handler.ExerciseLogResponse
 // @Router /exercise-logs [post]
 func (h *ExerciseLogHandler) CreateExerciseLog(w http.ResponseWriter, r *http.Request) {
 	var req CreateExerciseLogRequest
@@ -68,7 +68,7 @@ func (h *ExerciseLogHandler) CreateExerciseLog(w http.ResponseWriter, r *http.Re
 // @Tags exercise_logs
 // @Produce json
 // @Param id path string true "Log ID"
-// @Success 200 {object} database.ExerciseLog
+// @Success 200 {object} handler.ExerciseLogResponse
 // @Router /exercise-logs/{id} [get]
 func (h *ExerciseLogHandler) GetExerciseLog(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

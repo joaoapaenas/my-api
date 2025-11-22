@@ -33,7 +33,7 @@ type EndSessionPauseRequest struct {
 // @Accept json
 // @Produce json
 // @Param input body CreateSessionPauseRequest true "Session pause info"
-// @Success 201 {object} database.SessionPause
+// @Success 201 {object} handler.SessionPauseResponse
 // @Router /session-pauses [post]
 func (h *SessionPauseHandler) CreateSessionPause(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionPauseRequest
@@ -64,7 +64,7 @@ func (h *SessionPauseHandler) CreateSessionPause(w http.ResponseWriter, r *http.
 // @Tags session_pauses
 // @Produce json
 // @Param id path string true "Pause ID"
-// @Success 200 {object} database.SessionPause
+// @Success 200 {object} handler.SessionPauseResponse
 // @Router /session-pauses/{id} [get]
 func (h *SessionPauseHandler) GetSessionPause(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

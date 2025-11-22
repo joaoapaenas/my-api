@@ -112,24 +112,3 @@ func (h *UserHandler) respondWithJSON(w http.ResponseWriter, code int, payload i
 func (h *UserHandler) respondWithError(w http.ResponseWriter, code int, message string) {
 	h.respondWithJSON(w, code, map[string]string{"error": message})
 }
-
-func formatValidationErrors(err error) map[string]string {
-	errors := make(map[string]string)
-	// Assert that it is a validator.ValidationErrors
-	if validationErrs, ok := err.(validator.ValidationErrors); ok {
-		for _, e := range validationErrs {
-			// Simple message mapping
-			switch e.Tag() {
-			case "required":
-				errors[e.Field()] = "This field is required"
-			case "email":
-				errors[e.Field()] = "Invalid email format"
-			case "min":
-				errors[e.Field()] = "Must be at least " + e.Param() + " characters"
-			default:
-				errors[e.Field()] = "Invalid value"
-			}
-		}
-	}
-	return errors
-}

@@ -34,7 +34,7 @@ type UpdateSubjectRequest struct {
 // @Accept json
 // @Produce json
 // @Param input body CreateSubjectRequest true "Subject info"
-// @Success 201 {object} database.Subject
+// @Success 201 {object} handler.SubjectResponse
 // @Router /subjects [post]
 func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 	var req CreateSubjectRequest
@@ -64,7 +64,7 @@ func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 // @Summary List all subjects
 // @Tags subjects
 // @Produce json
-// @Success 200 {array} database.Subject
+// @Success 200 {array} handler.SubjectResponse
 // @Router /subjects [get]
 func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 	subjects, err := h.svc.ListSubjects(r.Context())
@@ -81,7 +81,7 @@ func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 // @Tags subjects
 // @Produce json
 // @Param id path string true "Subject ID"
-// @Success 200 {object} database.Subject
+// @Success 200 {object} handler.SubjectResponse
 // @Router /subjects/{id} [get]
 func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

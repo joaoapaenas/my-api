@@ -37,7 +37,7 @@ type UpdateCycleItemRequest struct {
 // @Produce json
 // @Param id path string true "Cycle ID"
 // @Param input body CreateCycleItemRequest true "Cycle item info"
-// @Success 201 {object} database.CycleItem
+// @Success 201 {object} handler.CycleItemResponse
 // @Router /study-cycles/{id}/items [post]
 func (h *CycleItemHandler) CreateCycleItem(w http.ResponseWriter, r *http.Request) {
 	cycleID := chi.URLParam(r, "id")
@@ -74,7 +74,7 @@ func (h *CycleItemHandler) CreateCycleItem(w http.ResponseWriter, r *http.Reques
 // @Tags cycle_items
 // @Produce json
 // @Param id path string true "Cycle ID"
-// @Success 200 {array} database.CycleItem
+// @Success 200 {array} handler.CycleItemResponse
 // @Router /study-cycles/{id}/items [get]
 func (h *CycleItemHandler) ListCycleItems(w http.ResponseWriter, r *http.Request) {
 	cycleID := chi.URLParam(r, "id")
@@ -97,7 +97,7 @@ func (h *CycleItemHandler) ListCycleItems(w http.ResponseWriter, r *http.Request
 // @Tags cycle_items
 // @Produce json
 // @Param id path string true "Item ID"
-// @Success 200 {object} database.CycleItem
+// @Success 200 {object} handler.CycleItemResponse
 // @Router /cycle-items/{id} [get]
 func (h *CycleItemHandler) GetCycleItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

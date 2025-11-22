@@ -33,7 +33,7 @@ type UpdateTopicRequest struct {
 // @Produce json
 // @Param id path string true "Subject ID"
 // @Param input body CreateTopicRequest true "Topic info"
-// @Success 201 {object} database.Topic
+// @Success 201 {object} handler.TopicResponse
 // @Router /subjects/{id}/topics [post]
 func (h *TopicHandler) CreateTopic(w http.ResponseWriter, r *http.Request) {
 	subjectID := chi.URLParam(r, "id")
@@ -70,7 +70,7 @@ func (h *TopicHandler) CreateTopic(w http.ResponseWriter, r *http.Request) {
 // @Tags topics
 // @Produce json
 // @Param id path string true "Subject ID"
-// @Success 200 {array} database.Topic
+// @Success 200 {array} handler.TopicResponse
 // @Router /subjects/{id}/topics [get]
 func (h *TopicHandler) ListTopics(w http.ResponseWriter, r *http.Request) {
 	subjectID := chi.URLParam(r, "id")
@@ -93,7 +93,7 @@ func (h *TopicHandler) ListTopics(w http.ResponseWriter, r *http.Request) {
 // @Tags topics
 // @Produce json
 // @Param id path string true "Topic ID"
-// @Success 200 {object} database.Topic
+// @Success 200 {object} handler.TopicResponse
 // @Router /topics/{id} [get]
 func (h *TopicHandler) GetTopic(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

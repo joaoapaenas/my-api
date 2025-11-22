@@ -36,7 +36,7 @@ type UpdateStudyCycleRequest struct {
 // @Accept json
 // @Produce json
 // @Param input body CreateStudyCycleRequest true "Study cycle info"
-// @Success 201 {object} database.StudyCycle
+// @Success 201 {object} handler.StudyCycleResponse
 // @Router /study-cycles [post]
 func (h *StudyCycleHandler) CreateStudyCycle(w http.ResponseWriter, r *http.Request) {
 	var req CreateStudyCycleRequest
@@ -66,7 +66,7 @@ func (h *StudyCycleHandler) CreateStudyCycle(w http.ResponseWriter, r *http.Requ
 // @Summary Get the active study cycle
 // @Tags study_cycles
 // @Produce json
-// @Success 200 {object} database.StudyCycle
+// @Success 200 {object} handler.StudyCycleResponse
 // @Router /study-cycles/active [get]
 func (h *StudyCycleHandler) GetActiveStudyCycle(w http.ResponseWriter, r *http.Request) {
 	cycle, err := h.svc.GetActiveStudyCycle(r.Context())
@@ -83,7 +83,7 @@ func (h *StudyCycleHandler) GetActiveStudyCycle(w http.ResponseWriter, r *http.R
 // @Tags study_cycles
 // @Produce json
 // @Param id path string true "Cycle ID"
-// @Success 200 {object} database.StudyCycle
+// @Success 200 {object} handler.StudyCycleResponse
 // @Router /study-cycles/{id} [get]
 func (h *StudyCycleHandler) GetStudyCycle(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

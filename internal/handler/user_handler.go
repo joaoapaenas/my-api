@@ -28,6 +28,9 @@ type CreateUserRequest struct {
 
 	// min=2: must be at least 2 chars
 	Name string `json:"name" validate:"required,min=2"`
+
+	// min=6: must be at least 6 chars
+	Password string `json:"password" validate:"required,min=6"`
 }
 
 // CreateUser godoc
@@ -61,7 +64,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Call Service (Business Logic)
 	// Notice: We don't generate UUIDs here anymore.
-	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name)
+	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
 		// Check for specific domain errors if you defined them
 		if errors.Is(err, service.ErrEmailTaken) {

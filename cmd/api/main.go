@@ -111,12 +111,16 @@ func main() {
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
+	// Middleware
+	basicAuth := customMiddleware.NewBasicAuthMiddleware(userService)
+
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
 	})
 
 	r.Route("/subjects", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", subjectHandler.CreateSubject)
 		r.Get("/", subjectHandler.ListSubjects)
 		r.Get("/{id}", subjectHandler.GetSubject)
@@ -127,12 +131,14 @@ func main() {
 	})
 
 	r.Route("/topics", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/{id}", topicHandler.GetTopic)
 		r.Put("/{id}", topicHandler.UpdateTopic)
 		r.Delete("/{id}", topicHandler.DeleteTopic)
 	})
 
 	r.Route("/study-cycles", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
 		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems) // Round-robin
@@ -144,12 +150,14 @@ func main() {
 	})
 
 	r.Route("/cycle-items", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/{id}", cycleItemHandler.GetCycleItem)
 		r.Put("/{id}", cycleItemHandler.UpdateCycleItem)
 		r.Delete("/{id}", cycleItemHandler.DeleteCycleItem)
 	})
 
 	r.Route("/study-sessions", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", studySessionHandler.CreateStudySession)
 		r.Get("/open", studySessionHandler.GetOpenSession) // Crash recovery
 		r.Get("/{id}", studySessionHandler.GetStudySession)
@@ -158,6 +166,7 @@ func main() {
 	})
 
 	r.Route("/session-pauses", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", sessionPauseHandler.CreateSessionPause)
 		r.Get("/{id}", sessionPauseHandler.GetSessionPause)
 		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
@@ -165,6 +174,7 @@ func main() {
 	})
 
 	r.Route("/exercise-logs", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
 		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
@@ -172,6 +182,7 @@ func main() {
 
 	// Analytics routes
 	r.Route("/analytics", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/time-by-subject", analyticsHandler.GetTimeReportBySubject)
 		r.Get("/accuracy-by-subject", analyticsHandler.GetAccuracyBySubject)
 		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetAccuracyByTopic)

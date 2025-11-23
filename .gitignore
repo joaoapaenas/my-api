@@ -2,6 +2,7 @@ tmp
 .env
 .envrc
 bin/
+*.db
 
 # Logs
 logs
@@ -38,6 +39,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 output.md
+*.exe
 
 node_modules
 dist

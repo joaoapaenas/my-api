@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/repository"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -14,9 +15,8 @@ var (
 	ErrEmailTaken   = errors.New("email already taken")
 )
 
-// UserService defines the business logic behavior
 type UserService interface {
-	CreateUser(ctx context.Context, email, name string) (database.User, error)
+	CreateUser(ctx context.Context, email, name, password string) (database.User, error)
 	GetUserByEmail(ctx context.Context, email string) (database.User, error)
 }
 
@@ -29,14 +29,20 @@ func NewUserManager(repo repository.UserRepository) *UserManager {
 	return &UserManager{repo: repo}
 }
 
-func (s *UserManager) CreateUser(ctx context.Context, email, name string) (database.User, error) {
+func (s *UserManager) CreateUser(ctx context.Context, email, name, password string) (database.User, error) {
 	// Logic: Generate UUID here, not in the handler
 	id := uuid.New().String()
 
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return database.User{}, err
+	}
+
 	user, err := s.repo.CreateUser(ctx, database.CreateUserParams{
-		ID:    id,
-		Email: email,
-		Name:  name,
+		ID:           id,
+		Email:        email,
+		Name:         name,
+		PasswordHash: string(hashedPassword),
 	})
 	if err != nil {
 		// In a real app, check for specific DB errors (like unique constraint violation)

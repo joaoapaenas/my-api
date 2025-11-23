@@ -199,7 +199,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -215,6 +214,7 @@ import (
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/handler"
 	"github.com/joaoapaenas/my-api/internal/logger"
+	customMiddleware "github.com/joaoapaenas/my-api/internal/middleware"
 	"github.com/joaoapaenas/my-api/internal/repository"
 	"github.com/joaoapaenas/my-api/internal/service"
 
@@ -230,7 +230,8 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("Failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Init(cfg.Env)
@@ -293,7 +294,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(customMiddleware.RequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
@@ -306,12 +307,16 @@ func main() {
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
+	// Middleware
+	basicAuth := customMiddleware.NewBasicAuthMiddleware(userService)
+
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
 	})
 
 	r.Route("/subjects", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", subjectHandler.CreateSubject)
 		r.Get("/", subjectHandler.ListSubjects)
 		r.Get("/{id}", subjectHandler.GetSubject)
@@ -322,12 +327,14 @@ func main() {
 	})
 
 	r.Route("/topics", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/{id}", topicHandler.GetTopic)
 		r.Put("/{id}", topicHandler.UpdateTopic)
 		r.Delete("/{id}", topicHandler.DeleteTopic)
 	})
 
 	r.Route("/study-cycles", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
 		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems) // Round-robin
@@ -339,12 +346,14 @@ func main() {
 	})
 
 	r.Route("/cycle-items", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/{id}", cycleItemHandler.GetCycleItem)
 		r.Put("/{id}", cycleItemHandler.UpdateCycleItem)
 		r.Delete("/{id}", cycleItemHandler.DeleteCycleItem)
 	})
 
 	r.Route("/study-sessions", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", studySessionHandler.CreateStudySession)
 		r.Get("/open", studySessionHandler.GetOpenSession) // Crash recovery
 		r.Get("/{id}", studySessionHandler.GetStudySession)
@@ -353,6 +362,7 @@ func main() {
 	})
 
 	r.Route("/session-pauses", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", sessionPauseHandler.CreateSessionPause)
 		r.Get("/{id}", sessionPauseHandler.GetSessionPause)
 		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
@@ -360,6 +370,7 @@ func main() {
 	})
 
 	r.Route("/exercise-logs", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
 		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
@@ -367,6 +378,7 @@ func main() {
 
 	// Analytics routes
 	r.Route("/analytics", func(r chi.Router) {
+		r.Use(basicAuth.BasicAuth)
 		r.Get("/time-by-subject", analyticsHandler.GetTimeReportBySubject)
 		r.Get("/accuracy-by-subject", analyticsHandler.GetAccuracyBySubject)
 		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetAccuracyByTopic)
@@ -415,59 +427,46 @@ package main
 
 import (
 	"database/sql"
-	"flag"
 	"log"
+	"os"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
-	cmd := flag.String("cmd", "", "Command: up or down")
-	flag.Parse()
-
-	// 1. Open DB using the "sqlite" driver provided by the migration library (modernc)
-	// We do not need to import glebarez here because 'database/sqlite' above
-	// already registers a driver named "sqlite".
-	db, err := sql.Open("sqlite", "dev.db")
+	db, err := sql.Open("sqlite3", "dev.db")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	// 2. Create Migration Driver instance
-	driver, err := sqlite.WithInstance(db, &sqlite.Config{})
+	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 3. Initialize Migrate
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://sql/schema",
-		"sqlite",
+		"sqlite3",
 		driver,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 4. Run Command
-	switch *cmd {
-	case "up":
-		err := m.Up()
-		if err != nil && err != migrate.ErrNoChange {
+	if len(os.Args) > 1 && os.Args[1] == "down" {
+		if err := m.Down(); err != nil && err != migrate.ErrNoChange {
 			log.Fatal(err)
 		}
-		log.Println("Migrated UP successfully!")
-	case "down":
-		err := m.Down()
-		if err != nil && err != migrate.ErrNoChange {
+		log.Println("Migration down successful")
+	} else {
+		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 			log.Fatal(err)
 		}
-		log.Println("Migrated DOWN successfully!")
-	default:
-		log.Fatal("Unknown command. Use -cmd=up or -cmd=down")
+		log.Println("Migration up successful")
 	}
 }
 
@@ -495,6 +494,126 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/analytics/accuracy-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by subject",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.AccuracyReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/accuracy-by-topic/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by topic for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/heatmap": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get activity heatmap data",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Number of days",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.HeatmapDayResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/time-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get time tracking report by subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/cycle-items/{id}": {
             "get": {
                 "produces": [
@@ -835,6 +954,28 @@ const docTemplate = `{
                 }
             }
         },
+        "/study-cycles/active/items": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_cycles"
+                ],
+                "summary": "Get active cycle with all items (round-robin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.CycleItemWithSubjectResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/study-cycles/{id}": {
             "get": {
                 "produces": [
@@ -1018,6 +1159,25 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/handler.StudySessionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/study-sessions/open": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_sessions"
+                ],
+                "summary": "Get open/unfinished session (crash recovery)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.OpenSessionResponse"
                         }
                     }
                 }
@@ -1499,6 +1659,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.AccuracyReportResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "color_hex": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
+                }
+            }
+        },
         "handler.CreateCycleItemRequest": {
             "type": "object",
             "required": [
@@ -1668,6 +1851,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.CycleItemWithSubjectResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "order_index": {
+                    "type": "integer"
+                },
+                "planned_duration_minutes": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.EndSessionPauseRequest": {
             "type": "object",
             "required": [
@@ -1701,6 +1907,43 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "topic_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.HeatmapDayResponse": {
+            "type": "object",
+            "properties": {
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "study_date": {
+                    "type": "string"
+                },
+                "total_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.OpenSessionResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
                     "type": "string"
                 }
             }
@@ -1797,6 +2040,46 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "handler.TimeReportResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_hours_net": {
+                    "type": "number"
+                }
+            }
+        },
+        "handler.TopicAccuracyResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "topic_id": {
+                    "type": "string"
+                },
+                "topic_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
                 }
             }
         },
@@ -1944,6 +2227,126 @@ func init() {
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/analytics/accuracy-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by subject",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.AccuracyReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/accuracy-by-topic/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by topic for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/heatmap": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get activity heatmap data",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Number of days",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.HeatmapDayResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/time-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get time tracking report by subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/cycle-items/{id}": {
             "get": {
                 "produces": [
@@ -2284,6 +2687,28 @@ func init() {
                 }
             }
         },
+        "/study-cycles/active/items": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_cycles"
+                ],
+                "summary": "Get active cycle with all items (round-robin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.CycleItemWithSubjectResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/study-cycles/{id}": {
             "get": {
                 "produces": [
@@ -2467,6 +2892,25 @@ func init() {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/handler.StudySessionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/study-sessions/open": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_sessions"
+                ],
+                "summary": "Get open/unfinished session (crash recovery)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.OpenSessionResponse"
                         }
                     }
                 }
@@ -2948,6 +3392,29 @@ func init() {
                 }
             }
         },
+        "handler.AccuracyReportResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "color_hex": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
+                }
+            }
+        },
         "handler.CreateCycleItemRequest": {
             "type": "object",
             "required": [
@@ -3117,6 +3584,29 @@ func init() {
                 }
             }
         },
+        "handler.CycleItemWithSubjectResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "order_index": {
+                    "type": "integer"
+                },
+                "planned_duration_minutes": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.EndSessionPauseRequest": {
             "type": "object",
             "required": [
@@ -3150,6 +3640,43 @@ func init() {
                     "type": "string"
                 },
                 "topic_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.HeatmapDayResponse": {
+            "type": "object",
+            "properties": {
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "study_date": {
+                    "type": "string"
+                },
+                "total_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.OpenSessionResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
                     "type": "string"
                 }
             }
@@ -3246,6 +3773,46 @@ func init() {
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "handler.TimeReportResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_hours_net": {
+                    "type": "number"
+                }
+            }
+        },
+        "handler.TopicAccuracyResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "topic_id": {
+                    "type": "string"
+                },
+                "topic_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
                 }
             }
         },
@@ -3376,6 +3943,21 @@ definitions:
       name:
         type: string
     type: object
+  handler.AccuracyReportResponse:
+    properties:
+      accuracy_percentage:
+        type: number
+      color_hex:
+        type: string
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+      total_correct:
+        type: integer
+      total_questions:
+        type: integer
+    type: object
   handler.CreateCycleItemRequest:
     properties:
       order_index:
@@ -3493,6 +4075,21 @@ definitions:
       updated_at:
         type: string
     type: object
+  handler.CycleItemWithSubjectResponse:
+    properties:
+      color_hex:
+        type: string
+      cycle_item_id:
+        type: string
+      order_index:
+        type: integer
+      planned_duration_minutes:
+        type: integer
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+    type: object
   handler.EndSessionPauseRequest:
     properties:
       ended_at:
@@ -3515,6 +4112,30 @@ definitions:
       subject_id:
         type: string
       topic_id:
+        type: string
+    type: object
+  handler.HeatmapDayResponse:
+    properties:
+      sessions_count:
+        type: integer
+      study_date:
+        type: string
+      total_seconds:
+        type: integer
+    type: object
+  handler.OpenSessionResponse:
+    properties:
+      color_hex:
+        type: string
+      cycle_item_id:
+        type: string
+      id:
+        type: string
+      started_at:
+        type: string
+      subject_id:
+        type: string
+      subject_name:
         type: string
     type: object
   handler.SessionPauseResponse:
@@ -3578,6 +4199,32 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  handler.TimeReportResponse:
+    properties:
+      color_hex:
+        type: string
+      sessions_count:
+        type: integer
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+      total_hours_net:
+        type: number
+    type: object
+  handler.TopicAccuracyResponse:
+    properties:
+      accuracy_percentage:
+        type: number
+      topic_id:
+        type: string
+      topic_name:
+        type: string
+      total_correct:
+        type: integer
+      total_questions:
+        type: integer
     type: object
   handler.TopicResponse:
     properties:
@@ -3656,6 +4303,83 @@ info:
   title: My Go API
   version: "1.0"
 paths:
+  /analytics/accuracy-by-subject:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.AccuracyReportResponse'
+            type: array
+      summary: Get accuracy report by subject
+      tags:
+      - analytics
+  /analytics/accuracy-by-topic/{subject_id}:
+    get:
+      parameters:
+      - description: Subject ID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TopicAccuracyResponse'
+            type: array
+      summary: Get accuracy report by topic for a subject
+      tags:
+      - analytics
+  /analytics/heatmap:
+    get:
+      parameters:
+      - default: 30
+        description: Number of days
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.HeatmapDayResponse'
+            type: array
+      summary: Get activity heatmap data
+      tags:
+      - analytics
+  /analytics/time-by-subject:
+    get:
+      parameters:
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TimeReportResponse'
+            type: array
+      summary: Get time tracking report by subject
+      tags:
+      - analytics
   /cycle-items/{id}:
     delete:
       parameters:
@@ -3976,6 +4700,20 @@ paths:
       summary: Get the active study cycle
       tags:
       - study_cycles
+  /study-cycles/active/items:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.CycleItemWithSubjectResponse'
+            type: array
+      summary: Get active cycle with all items (round-robin)
+      tags:
+      - study_cycles
   /study-sessions:
     post:
       consumes:
@@ -4051,6 +4789,18 @@ paths:
           schema:
             type: string
       summary: Update study session duration
+      tags:
+      - study_sessions
+  /study-sessions/open:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OpenSessionResponse'
+      summary: Get open/unfinished session (crash recovery)
       tags:
       - study_sessions
   /subjects:
@@ -4501,7 +5251,7 @@ SELECT
     COALESCE(SUM(net_duration_seconds), 0) AS total_seconds
 FROM study_sessions
 WHERE finished_at IS NOT NULL
-  AND datetime(started_at) >= datetime('now', '-' || CAST(? AS TEXT) || ' days')
+  AND datetime(started_at) >= datetime('now', '-' || CAST(?1 AS TEXT) || ' days')
 GROUP BY study_date
 ORDER BY study_date DESC
 `
@@ -4512,8 +5262,8 @@ type GetActivityHeatmapRow struct {
 	TotalSeconds  interface{} `json:"total_seconds"`
 }
 
-func (q *Queries) GetActivityHeatmap(ctx context.Context, dollar_1 string) ([]GetActivityHeatmapRow, error) {
-	rows, err := q.db.QueryContext(ctx, getActivityHeatmap, dollar_1)
+func (q *Queries) GetActivityHeatmap(ctx context.Context, daysCount string) ([]GetActivityHeatmapRow, error) {
+	rows, err := q.db.QueryContext(ctx, getActivityHeatmap, daysCount)
 	if err != nil {
 		return nil, err
 	}
@@ -4546,8 +5296,8 @@ SELECT
 FROM subjects s
 LEFT JOIN study_sessions ss ON s.id = ss.subject_id 
     AND ss.finished_at IS NOT NULL
-    AND (? = '' OR ss.started_at >= ?)
-    AND (? = '' OR ss.started_at <= ?)
+    AND (?1 = '' OR ss.started_at >= ?1)
+    AND (?2 = '' OR ss.started_at <= ?2)
 WHERE s.deleted_at IS NULL
 GROUP BY s.id, s.name, s.color_hex
 HAVING sessions_count > 0
@@ -4555,10 +5305,8 @@ ORDER BY total_hours_net DESC
 `
 
 type GetTimeReportBySubjectParams struct {
-	Column1     interface{} `json:"column_1"`
-	StartedAt   string      `json:"started_at"`
-	Column3     interface{} `json:"column_3"`
-	StartedAt_2 string      `json:"started_at_2"`
+	StartDateFrom interface{} `json:"start_date_from"`
+	StartDateTo   interface{} `json:"start_date_to"`
 }
 
 type GetTimeReportBySubjectRow struct {
@@ -4571,12 +5319,7 @@ type GetTimeReportBySubjectRow struct {
 
 // Analytics Queries for Study App
 func (q *Queries) GetTimeReportBySubject(ctx context.Context, arg GetTimeReportBySubjectParams) ([]GetTimeReportBySubjectRow, error) {
-	rows, err := q.db.QueryContext(ctx, getTimeReportBySubject,
-		arg.Column1,
-		arg.StartedAt,
-		arg.Column3,
-		arg.StartedAt_2,
-	)
+	rows, err := q.db.QueryContext(ctx, getTimeReportBySubject, arg.StartDateFrom, arg.StartDateTo)
 	if err != nil {
 		return nil, err
 	}
@@ -4961,10 +5704,11 @@ type Topic struct {
 }
 
 type User struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"created_at"`
+	PasswordHash string    `json:"password_hash"`
 }
 
 ```
@@ -5005,7 +5749,7 @@ type Querier interface {
 	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]GetAccuracyByTopicRow, error)
 	GetActiveCycleWithItems(ctx context.Context) ([]GetActiveCycleWithItemsRow, error)
 	GetActiveStudyCycle(ctx context.Context) (StudyCycle, error)
-	GetActivityHeatmap(ctx context.Context, dollar_1 string) ([]GetActivityHeatmapRow, error)
+	GetActivityHeatmap(ctx context.Context, daysCount string) ([]GetActivityHeatmapRow, error)
 	GetCycleItem(ctx context.Context, id string) (CycleItem, error)
 	GetExerciseLog(ctx context.Context, id string) (ExerciseLog, error)
 	GetOpenSession(ctx context.Context) (GetOpenSessionRow, error)
@@ -5723,31 +6467,38 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, email, name)
-VALUES (?, ?, ?)
-RETURNING id, email, name, created_at
+INSERT INTO users (id, email, name, password_hash)
+VALUES (?, ?, ?, ?)
+RETURNING id, email, name, created_at, password_hash
 `
 
 type CreateUserParams struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID           string `json:"id"`
+	Email        string `json:"email"`
+	Name         string `json:"name"`
+	PasswordHash string `json:"password_hash"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.ID, arg.Email, arg.Name)
+	row := q.db.QueryRowContext(ctx, createUser,
+		arg.ID,
+		arg.Email,
+		arg.Name,
+		arg.PasswordHash,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.Name,
 		&i.CreatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, created_at FROM users
+SELECT id, email, name, created_at, password_hash FROM users
 WHERE email = ? LIMIT 1
 `
 
@@ -5759,6 +6510,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.Name,
 		&i.CreatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
@@ -5789,19 +6541,19 @@ func NewAnalyticsHandler(svc service.AnalyticsService) *AnalyticsHandler {
 	return &AnalyticsHandler{svc: svc}
 }
 
-// GetTimeReportBySubject godoc
-// @Summary Get time tracking report by subject
+// GetTimeReport godoc
+// @Summary Get net study time report by subject
 // @Tags analytics
 // @Produce json
-// @Param start_date query string false "Start date (YYYY-MM-DD)"
-// @Param end_date query string false "End date (YYYY-MM-DD)"
-// @Success 200 {array} handler.TimeReportResponse
-// @Router /analytics/time-by-subject [get]
-func (h *AnalyticsHandler) GetTimeReportBySubject(w http.ResponseWriter, r *http.Request) {
-	startDate := r.URL.Query().Get("start_date")
-	endDate := r.URL.Query().Get("end_date")
+// @Param start_date_from query string false "Start Date From (YYYY-MM-DD)"
+// @Param start_date_to query string false "Start Date To (YYYY-MM-DD)"
+// @Success 200 {array} database.GetTimeReportBySubjectRow
+// @Router /analytics/time-report [get]
+func (h *AnalyticsHandler) GetTimeReport(w http.ResponseWriter, r *http.Request) {
+	startDateFrom := r.URL.Query().Get("start_date_from")
+	startDateTo := r.URL.Query().Get("start_date_to")
 
-	report, err := h.svc.GetTimeReportBySubject(r.Context(), startDate, endDate)
+	report, err := h.svc.GetTimeReport(r.Context(), startDateFrom, startDateTo)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -5810,14 +6562,14 @@ func (h *AnalyticsHandler) GetTimeReportBySubject(w http.ResponseWriter, r *http
 	h.respondWithJSON(w, http.StatusOK, report)
 }
 
-// GetAccuracyBySubject godoc
-// @Summary Get accuracy report by subject
+// GetGlobalAccuracy godoc
+// @Summary Get global accuracy by subject
 // @Tags analytics
 // @Produce json
-// @Success 200 {array} handler.AccuracyReportResponse
-// @Router /analytics/accuracy-by-subject [get]
-func (h *AnalyticsHandler) GetAccuracyBySubject(w http.ResponseWriter, r *http.Request) {
-	report, err := h.svc.GetAccuracyBySubject(r.Context())
+// @Success 200 {array} database.GetAccuracyBySubjectRow
+// @Router /analytics/accuracy [get]
+func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Request) {
+	report, err := h.svc.GetGlobalAccuracy(r.Context())
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -5826,21 +6578,21 @@ func (h *AnalyticsHandler) GetAccuracyBySubject(w http.ResponseWriter, r *http.R
 	h.respondWithJSON(w, http.StatusOK, report)
 }
 
-// GetAccuracyByTopic godoc
-// @Summary Get accuracy report by topic for a subject
+// GetWeakPoints godoc
+// @Summary Get weak points (accuracy by topic) for a subject
 // @Tags analytics
 // @Produce json
 // @Param subject_id path string true "Subject ID"
-// @Success 200 {array} handler.TopicAccuracyResponse
-// @Router /analytics/accuracy-by-topic/{subject_id} [get]
-func (h *AnalyticsHandler) GetAccuracyByTopic(w http.ResponseWriter, r *http.Request) {
+// @Success 200 {array} database.GetAccuracyByTopicRow
+// @Router /analytics/weak-points/{subject_id} [get]
+func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request) {
 	subjectID := chi.URLParam(r, "subject_id")
 	if subjectID == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
 		return
 	}
 
-	report, err := h.svc.GetAccuracyByTopic(r.Context(), subjectID)
+	report, err := h.svc.GetWeakPoints(r.Context(), subjectID)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -5849,23 +6601,23 @@ func (h *AnalyticsHandler) GetAccuracyByTopic(w http.ResponseWriter, r *http.Req
 	h.respondWithJSON(w, http.StatusOK, report)
 }
 
-// GetActivityHeatmap godoc
-// @Summary Get activity heatmap data
+// GetHeatmap godoc
+// @Summary Get study activity heatmap
 // @Tags analytics
 // @Produce json
-// @Param days query int false "Number of days" default(30)
-// @Success 200 {array} handler.HeatmapDayResponse
+// @Param days query int false "Number of days (default 30)"
+// @Success 200 {array} database.GetActivityHeatmapRow
 // @Router /analytics/heatmap [get]
-func (h *AnalyticsHandler) GetActivityHeatmap(w http.ResponseWriter, r *http.Request) {
+func (h *AnalyticsHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 	daysStr := r.URL.Query().Get("days")
-	days := 30 // default
+	var days int64 = 30
 	if daysStr != "" {
-		if parsed, err := strconv.Atoi(daysStr); err == nil && parsed > 0 {
-			days = parsed
+		if d, err := strconv.ParseInt(daysStr, 10, 64); err == nil {
+			days = d
 		}
 	}
 
-	heatmap, err := h.svc.GetActivityHeatmap(r.Context(), days)
+	heatmap, err := h.svc.GetHeatmap(r.Context(), days)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -7298,6 +8050,9 @@ type CreateUserRequest struct {
 
 	// min=2: must be at least 2 chars
 	Name string `json:"name" validate:"required,min=2"`
+
+	// min=6: must be at least 6 chars
+	Password string `json:"password" validate:"required,min=6"`
 }
 
 // CreateUser godoc
@@ -7331,7 +8086,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Call Service (Business Logic)
 	// Notice: We don't generate UUIDs here anymore.
-	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name)
+	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
 		// Check for specific domain errors if you defined them
 		if errors.Is(err, service.ErrEmailTaken) {
@@ -7390,41 +8145,100 @@ func (h *UserHandler) respondWithError(w http.ResponseWriter, code int, message 
 **File:** `internal/handler/user_handler_test.go`
 
 ```typescript
-package handler
+package handler_test
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/handler"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-func TestGetUser_Validation(t *testing.T) {
-	// This tests ONLY routing/basic logic, avoiding DB for simplicity in this snippet.
-	// For DB mocking, you would mock the 'database.Querier' interface.
+// MockUserService is a mock implementation of service.UserService
+type MockUserService struct {
+	mock.Mock
+}
+
+func (m *MockUserService) CreateUser(ctx context.Context, email, name, password string) (database.User, error) {
+	args := m.Called(ctx, email, name, password)
+	return args.Get(0).(database.User), args.Error(1)
+}
+
+func (m *MockUserService) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
+	args := m.Called(ctx, email)
+	return args.Get(0).(database.User), args.Error(1)
+}
+
+func TestUserHandler_CreateUser(t *testing.T) {
+	mockSvc := new(MockUserService)
+	h := handler.NewUserHandler(mockSvc)
 
 	tests := []struct {
-		name       string
-		url        string
-		wantStatus int
+		name           string
+		input          handler.CreateUserRequest
+		mockReturnUser database.User
+		mockReturnErr  error
+		wantStatus     int
 	}{
 		{
-			name:       "Missing Email",
-			url:        "/users/", // Chi might handle 404 here
-			wantStatus: 404,
+			name: "Success",
+			input: handler.CreateUserRequest{
+				Email:    "test@example.com",
+				Name:     "Test User",
+				Password: "password123",
+			},
+			mockReturnUser: database.User{ID: "1", Email: "test@example.com"},
+			mockReturnErr:  nil,
+			wantStatus:     http.StatusCreated,
+		},
+		{
+			name: "Validation Error",
+			input: handler.CreateUserRequest{
+				Email: "invalid-email",
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Service Error",
+			input: handler.CreateUserRequest{
+				Email:    "test@example.com",
+				Name:     "Test User",
+				Password: "password123",
+			},
+			mockReturnErr: errors.New("db error"),
+			wantStatus:    http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tt.url, nil)
+			// Setup mock expectation only if validation passes
+			if tt.wantStatus != http.StatusBadRequest {
+				mockSvc.On("CreateUser", mock.Anything, tt.input.Email, tt.input.Name, tt.input.Password).
+					Return(tt.mockReturnUser, tt.mockReturnErr).
+					Once()
+			}
+
+			body, _ := json.Marshal(tt.input)
+			req := httptest.NewRequest("POST", "/users", bytes.NewBuffer(body))
 			rr := httptest.NewRecorder()
 
-			// Note: In a real test, inject a MockQuerier here
-			h := NewUserHandler(nil)
-			// We can't call the actual method without the mock,
-			// so this serves as a structural example.
-			_ = h
-			_ = req
-			_ = rr
+			h.CreateUser(rr, req)
+
+			assert.Equal(t, tt.wantStatus, rr.Code)
+			if tt.wantStatus == http.StatusCreated {
+				var user database.User
+				json.NewDecoder(rr.Body).Decode(&user)
+				assert.Equal(t, tt.mockReturnUser.Email, user.Email)
+			}
 		})
 	}
 }
@@ -7468,6 +8282,106 @@ func Init(env string) {
 
 --- 
 
+**File:** `internal/middleware/basic_auth.go`
+
+```typescript
+package middleware
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/joaoapaenas/my-api/internal/service"
+	"golang.org/x/crypto/bcrypt"
+)
+
+type BasicAuthMiddleware struct {
+	userService service.UserService
+}
+
+func NewBasicAuthMiddleware(userService service.UserService) *BasicAuthMiddleware {
+	return &BasicAuthMiddleware{userService: userService}
+}
+
+func (m *BasicAuthMiddleware) BasicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email, password, ok := r.BasicAuth()
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		user, err := m.userService.GetUserByEmail(r.Context(), email)
+		if err != nil {
+			// User not found or DB error
+			slog.Warn("Basic Auth failed: user not found", "email", email, "error", err)
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Verify password
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+			slog.Warn("Basic Auth failed: invalid password", "email", email)
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+```
+
+--- 
+
+**File:** `internal/middleware/logger.go`
+
+```typescript
+package middleware
+
+import (
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+// RequestLogger is a middleware that logs the start and end of each request.
+func RequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Get the Request ID from Chi middleware
+		reqID := middleware.GetReqID(r.Context())
+
+		// Create a wrapper to capture the status code and bytes written
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		defer func() {
+			// Log the request completion
+			slog.Info("HTTP Request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", ww.Status(),
+				"bytes", ww.BytesWritten(),
+				"duration", time.Since(start).String(),
+				"request_id", reqID,
+				"ip", r.RemoteAddr,
+			)
+		}()
+
+		next.ServeHTTP(ww, r)
+	})
+}
+
+```
+
+--- 
+
 **File:** `internal/repository/analytics_repository.go`
 
 ```typescript
@@ -7475,7 +8389,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/joaoapaenas/my-api/internal/database"
 )
@@ -7484,7 +8397,7 @@ type AnalyticsRepository interface {
 	GetTimeReportBySubject(ctx context.Context, arg database.GetTimeReportBySubjectParams) ([]database.GetTimeReportBySubjectRow, error)
 	GetAccuracyBySubject(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error)
 	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error)
-	GetActivityHeatmap(ctx context.Context, days int64) ([]database.GetActivityHeatmapRow, error)
+	GetActivityHeatmap(ctx context.Context, daysCount string) ([]database.GetActivityHeatmapRow, error)
 }
 
 type SQLAnalyticsRepository struct {
@@ -7507,8 +8420,8 @@ func (r *SQLAnalyticsRepository) GetAccuracyByTopic(ctx context.Context, subject
 	return r.q.GetAccuracyByTopic(ctx, subjectID)
 }
 
-func (r *SQLAnalyticsRepository) GetActivityHeatmap(ctx context.Context, days int64) ([]database.GetActivityHeatmapRow, error) {
-	return r.q.GetActivityHeatmap(ctx, fmt.Sprintf("%d", days))
+func (r *SQLAnalyticsRepository) GetActivityHeatmap(ctx context.Context, daysCount string) ([]database.GetActivityHeatmapRow, error) {
+	return r.q.GetActivityHeatmap(ctx, daysCount)
 }
 
 ```
@@ -7905,16 +8818,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/repository"
 )
 
 type AnalyticsService interface {
-	GetTimeReportBySubject(ctx context.Context, startDate, endDate string) ([]database.GetTimeReportBySubjectRow, error)
-	GetAccuracyBySubject(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error)
-	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error)
-	GetActivityHeatmap(ctx context.Context, days int) ([]database.GetActivityHeatmapRow, error)
+	GetTimeReport(ctx context.Context, startDateFrom, startDateTo string) ([]database.GetTimeReportBySubjectRow, error)
+	GetGlobalAccuracy(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error)
+	GetWeakPoints(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error)
+	GetHeatmap(ctx context.Context, daysCount int64) ([]database.GetActivityHeatmapRow, error)
 }
 
 type AnalyticsManager struct {
@@ -7925,27 +8839,27 @@ func NewAnalyticsManager(repo repository.AnalyticsRepository) *AnalyticsManager 
 	return &AnalyticsManager{repo: repo}
 }
 
-func (s *AnalyticsManager) GetTimeReportBySubject(ctx context.Context, startDate, endDate string) ([]database.GetTimeReportBySubjectRow, error) {
-	// Prepare parameters for the query
-	// Empty strings mean no filter
+func (s *AnalyticsManager) GetTimeReport(ctx context.Context, startDateFrom, startDateTo string) ([]database.GetTimeReportBySubjectRow, error) {
 	return s.repo.GetTimeReportBySubject(ctx, database.GetTimeReportBySubjectParams{
-		Column1: startDate,
-		Column2: startDate,
-		Column3: endDate,
-		Column4: endDate,
+		StartDateFrom: startDateFrom,
+		StartDateTo:   startDateTo,
 	})
 }
 
-func (s *AnalyticsManager) GetAccuracyBySubject(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error) {
+func (s *AnalyticsManager) GetGlobalAccuracy(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error) {
 	return s.repo.GetAccuracyBySubject(ctx)
 }
 
-func (s *AnalyticsManager) GetAccuracyByTopic(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error) {
+func (s *AnalyticsManager) GetWeakPoints(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error) {
 	return s.repo.GetAccuracyByTopic(ctx, subjectID)
 }
 
-func (s *AnalyticsManager) GetActivityHeatmap(ctx context.Context, days int) ([]database.GetActivityHeatmapRow, error) {
-	return s.repo.GetActivityHeatmap(ctx, int64(days))
+func (s *AnalyticsManager) GetHeatmap(ctx context.Context, daysCount int64) ([]database.GetActivityHeatmapRow, error) {
+	// Default to 30 days if 0 or negative
+	if daysCount <= 0 {
+		daysCount = 30
+	}
+	return s.repo.GetActivityHeatmap(ctx, fmt.Sprintf("%d", daysCount))
 }
 
 ```
@@ -8023,6 +8937,105 @@ func (s *CycleItemManager) UpdateCycleItem(ctx context.Context, id, subjectID st
 
 func (s *CycleItemManager) DeleteCycleItem(ctx context.Context, id string) error {
 	return s.repo.DeleteCycleItem(ctx, id)
+}
+
+```
+
+--- 
+
+**File:** `internal/service/cycle_item_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockCycleItemRepository is a mock implementation of repository.CycleItemRepository
+type MockCycleItemRepository struct {
+	mock.Mock
+}
+
+func (m *MockCycleItemRepository) CreateCycleItem(ctx context.Context, arg database.CreateCycleItemParams) (database.CycleItem, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.CycleItem), args.Error(1)
+}
+
+func (m *MockCycleItemRepository) ListCycleItems(ctx context.Context, cycleID string) ([]database.CycleItem, error) {
+	args := m.Called(ctx, cycleID)
+	return args.Get(0).([]database.CycleItem), args.Error(1)
+}
+
+func (m *MockCycleItemRepository) GetCycleItem(ctx context.Context, id string) (database.CycleItem, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(database.CycleItem), args.Error(1)
+}
+
+func (m *MockCycleItemRepository) UpdateCycleItem(ctx context.Context, arg database.UpdateCycleItemParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
+func (m *MockCycleItemRepository) DeleteCycleItem(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func TestCycleItemManager_CreateCycleItem(t *testing.T) {
+	mockRepo := new(MockCycleItemRepository)
+	svc := service.NewCycleItemManager(mockRepo)
+
+	ctx := context.Background()
+	cycleID := "cycle-uuid"
+	subjectID := "subject-uuid"
+	orderIndex := 1
+	plannedDuration := 60
+
+	mockRepo.On("CreateCycleItem", ctx, mock.MatchedBy(func(arg database.CreateCycleItemParams) bool {
+		return arg.CycleID == cycleID && arg.SubjectID == subjectID && arg.OrderIndex == int64(orderIndex) && arg.PlannedDurationMinutes.Int64 == int64(plannedDuration)
+	})).Return(database.CycleItem{
+		ID:                     "item-uuid",
+		CycleID:                cycleID,
+		SubjectID:              subjectID,
+		OrderIndex:             int64(orderIndex),
+		PlannedDurationMinutes: sql.NullInt64{Int64: int64(plannedDuration), Valid: true},
+	}, nil)
+
+	item, err := svc.CreateCycleItem(ctx, cycleID, subjectID, orderIndex, plannedDuration)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(orderIndex), item.OrderIndex)
+	assert.Equal(t, int64(plannedDuration), item.PlannedDurationMinutes.Int64)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestCycleItemManager_ListCycleItems(t *testing.T) {
+	mockRepo := new(MockCycleItemRepository)
+	svc := service.NewCycleItemManager(mockRepo)
+
+	ctx := context.Background()
+	cycleID := "cycle-uuid"
+	expectedItems := []database.CycleItem{
+		{ID: "1", CycleID: cycleID, OrderIndex: 1},
+		{ID: "2", CycleID: cycleID, OrderIndex: 2},
+	}
+
+	mockRepo.On("ListCycleItems", ctx, cycleID).Return(expectedItems, nil)
+
+	items, err := svc.ListCycleItems(ctx, cycleID)
+
+	assert.NoError(t, err)
+	assert.Len(t, items, 2)
+	assert.Equal(t, int64(1), items[0].OrderIndex)
+	mockRepo.AssertExpectations(t)
 }
 
 ```
@@ -8249,6 +9262,103 @@ func (s *StudyCycleManager) GetActiveCycleWithItems(ctx context.Context) ([]data
 
 --- 
 
+**File:** `internal/service/study_cycle_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockStudyCycleRepository is a mock implementation of repository.StudyCycleRepository
+type MockStudyCycleRepository struct {
+	mock.Mock
+}
+
+func (m *MockStudyCycleRepository) CreateStudyCycle(ctx context.Context, arg database.CreateStudyCycleParams) (database.StudyCycle, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.StudyCycle), args.Error(1)
+}
+
+func (m *MockStudyCycleRepository) GetActiveStudyCycle(ctx context.Context) (database.StudyCycle, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(database.StudyCycle), args.Error(1)
+}
+
+func (m *MockStudyCycleRepository) GetStudyCycle(ctx context.Context, id string) (database.StudyCycle, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(database.StudyCycle), args.Error(1)
+}
+
+func (m *MockStudyCycleRepository) UpdateStudyCycle(ctx context.Context, arg database.UpdateStudyCycleParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
+func (m *MockStudyCycleRepository) DeleteStudyCycle(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockStudyCycleRepository) GetActiveCycleWithItems(ctx context.Context) ([]database.GetActiveCycleWithItemsRow, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]database.GetActiveCycleWithItemsRow), args.Error(1)
+}
+
+func TestStudyCycleManager_CreateStudyCycle(t *testing.T) {
+	mockRepo := new(MockStudyCycleRepository)
+	svc := service.NewStudyCycleManager(mockRepo)
+
+	ctx := context.Background()
+	name := "Cycle 1"
+	description := "First Cycle"
+	isActive := true
+
+	mockRepo.On("CreateStudyCycle", ctx, mock.MatchedBy(func(arg database.CreateStudyCycleParams) bool {
+		return arg.Name == name && arg.Description.String == description && arg.IsActive.Int64 == 1
+	})).Return(database.StudyCycle{
+		ID:          "cycle-uuid",
+		Name:        name,
+		Description: sql.NullString{String: description, Valid: true},
+		IsActive:    sql.NullInt64{Int64: 1, Valid: true},
+	}, nil)
+
+	cycle, err := svc.CreateStudyCycle(ctx, name, description, isActive)
+
+	assert.NoError(t, err)
+	assert.Equal(t, name, cycle.Name)
+	assert.Equal(t, int64(1), cycle.IsActive.Int64)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestStudyCycleManager_GetActiveStudyCycle(t *testing.T) {
+	mockRepo := new(MockStudyCycleRepository)
+	svc := service.NewStudyCycleManager(mockRepo)
+
+	ctx := context.Background()
+	expectedCycle := database.StudyCycle{ID: "active-uuid", Name: "Active Cycle", IsActive: sql.NullInt64{Int64: 1, Valid: true}}
+
+	mockRepo.On("GetActiveStudyCycle", ctx).Return(expectedCycle, nil)
+
+	cycle, err := svc.GetActiveStudyCycle(ctx)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "Active Cycle", cycle.Name)
+	mockRepo.AssertExpectations(t)
+}
+
+```
+
+--- 
+
 **File:** `internal/service/study_session_service.go`
 
 ```typescript
@@ -8341,6 +9451,103 @@ func (s *StudySessionManager) GetOpenSession(ctx context.Context) (database.GetO
 
 --- 
 
+**File:** `internal/service/study_session_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockStudySessionRepository is a mock implementation of repository.StudySessionRepository
+type MockStudySessionRepository struct {
+	mock.Mock
+}
+
+func (m *MockStudySessionRepository) CreateStudySession(ctx context.Context, arg database.CreateStudySessionParams) (database.StudySession, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.StudySession), args.Error(1)
+}
+
+func (m *MockStudySessionRepository) UpdateSessionDuration(ctx context.Context, arg database.UpdateSessionDurationParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
+func (m *MockStudySessionRepository) GetStudySession(ctx context.Context, id string) (database.StudySession, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(database.StudySession), args.Error(1)
+}
+
+func (m *MockStudySessionRepository) DeleteStudySession(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockStudySessionRepository) GetOpenSession(ctx context.Context) (database.GetOpenSessionRow, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(database.GetOpenSessionRow), args.Error(1)
+}
+
+func TestStudySessionManager_CreateStudySession(t *testing.T) {
+	mockRepo := new(MockStudySessionRepository)
+	svc := service.NewStudySessionManager(mockRepo)
+
+	ctx := context.Background()
+	subjectID := "subject-uuid"
+	cycleItemID := "item-uuid"
+	startedAt := "2023-10-27T10:00:00Z"
+
+	mockRepo.On("CreateStudySession", ctx, mock.MatchedBy(func(arg database.CreateStudySessionParams) bool {
+		return arg.SubjectID == subjectID && arg.CycleItemID.String == cycleItemID && arg.StartedAt == startedAt
+	})).Return(database.StudySession{
+		ID:          "session-uuid",
+		SubjectID:   subjectID,
+		CycleItemID: sql.NullString{String: cycleItemID, Valid: true},
+		StartedAt:   startedAt,
+	}, nil)
+
+	session, err := svc.CreateStudySession(ctx, subjectID, cycleItemID, startedAt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, subjectID, session.SubjectID)
+	assert.Equal(t, cycleItemID, session.CycleItemID.String)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestStudySessionManager_UpdateSessionDuration(t *testing.T) {
+	mockRepo := new(MockStudySessionRepository)
+	svc := service.NewStudySessionManager(mockRepo)
+
+	ctx := context.Background()
+	sessionID := "session-uuid"
+	finishedAt := "2023-10-27T11:00:00Z"
+	gross := 3600
+	net := 3000
+	notes := "Good session"
+
+	mockRepo.On("UpdateSessionDuration", ctx, mock.MatchedBy(func(arg database.UpdateSessionDurationParams) bool {
+		return arg.ID == sessionID && arg.FinishedAt.String == finishedAt && arg.GrossDurationSeconds.Int64 == int64(gross) && arg.NetDurationSeconds.Int64 == int64(net)
+	})).Return(nil)
+
+	err := svc.UpdateSessionDuration(ctx, sessionID, finishedAt, gross, net, notes)
+
+	assert.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+}
+
+```
+
+--- 
+
 **File:** `internal/service/subject_service.go`
 
 ```typescript
@@ -8415,6 +9622,100 @@ func (s *SubjectManager) DeleteSubject(ctx context.Context, id string) error {
 
 --- 
 
+**File:** `internal/service/subject_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockSubjectRepository is a mock implementation of repository.SubjectRepository
+type MockSubjectRepository struct {
+	mock.Mock
+}
+
+func (m *MockSubjectRepository) CreateSubject(ctx context.Context, arg database.CreateSubjectParams) (database.Subject, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.Subject), args.Error(1)
+}
+
+func (m *MockSubjectRepository) ListSubjects(ctx context.Context) ([]database.Subject, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]database.Subject), args.Error(1)
+}
+
+func (m *MockSubjectRepository) GetSubject(ctx context.Context, id string) (database.Subject, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(database.Subject), args.Error(1)
+}
+
+func (m *MockSubjectRepository) UpdateSubject(ctx context.Context, arg database.UpdateSubjectParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
+func (m *MockSubjectRepository) DeleteSubject(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func TestSubjectManager_CreateSubject(t *testing.T) {
+	mockRepo := new(MockSubjectRepository)
+	svc := service.NewSubjectManager(mockRepo)
+
+	ctx := context.Background()
+	name := "Mathematics"
+	colorHex := "#FF0000"
+
+	mockRepo.On("CreateSubject", ctx, mock.MatchedBy(func(arg database.CreateSubjectParams) bool {
+		return arg.Name == name && arg.ColorHex.String == colorHex && arg.ColorHex.Valid
+	})).Return(database.Subject{
+		ID:       "uuid",
+		Name:     name,
+		ColorHex: sql.NullString{String: colorHex, Valid: true},
+	}, nil)
+
+	subject, err := svc.CreateSubject(ctx, name, colorHex)
+
+	assert.NoError(t, err)
+	assert.Equal(t, name, subject.Name)
+	assert.Equal(t, colorHex, subject.ColorHex.String)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestSubjectManager_ListSubjects(t *testing.T) {
+	mockRepo := new(MockSubjectRepository)
+	svc := service.NewSubjectManager(mockRepo)
+
+	ctx := context.Background()
+	expectedSubjects := []database.Subject{
+		{ID: "1", Name: "Math"},
+		{ID: "2", Name: "Physics"},
+	}
+
+	mockRepo.On("ListSubjects", ctx).Return(expectedSubjects, nil)
+
+	subjects, err := svc.ListSubjects(ctx)
+
+	assert.NoError(t, err)
+	assert.Len(t, subjects, 2)
+	assert.Equal(t, "Math", subjects[0].Name)
+	mockRepo.AssertExpectations(t)
+}
+
+```
+
+--- 
+
 **File:** `internal/service/topic_service.go`
 
 ```typescript
@@ -8476,6 +9777,96 @@ func (s *TopicManager) DeleteTopic(ctx context.Context, id string) error {
 
 --- 
 
+**File:** `internal/service/topic_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockTopicRepository is a mock implementation of repository.TopicRepository
+type MockTopicRepository struct {
+	mock.Mock
+}
+
+func (m *MockTopicRepository) CreateTopic(ctx context.Context, arg database.CreateTopicParams) (database.Topic, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.Topic), args.Error(1)
+}
+
+func (m *MockTopicRepository) ListTopicsBySubject(ctx context.Context, subjectID string) ([]database.Topic, error) {
+	args := m.Called(ctx, subjectID)
+	return args.Get(0).([]database.Topic), args.Error(1)
+}
+
+func (m *MockTopicRepository) GetTopic(ctx context.Context, id string) (database.Topic, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(database.Topic), args.Error(1)
+}
+
+func (m *MockTopicRepository) UpdateTopic(ctx context.Context, arg database.UpdateTopicParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
+func (m *MockTopicRepository) DeleteTopic(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func TestTopicManager_CreateTopic(t *testing.T) {
+	mockRepo := new(MockTopicRepository)
+	svc := service.NewTopicManager(mockRepo)
+
+	ctx := context.Background()
+	subjectID := "subject-uuid"
+	name := "Algebra"
+
+	mockRepo.On("CreateTopic", ctx, mock.MatchedBy(func(arg database.CreateTopicParams) bool {
+		return arg.SubjectID == subjectID && arg.Name == name
+	})).Return(database.Topic{
+		ID:        "topic-uuid",
+		SubjectID: subjectID,
+		Name:      name,
+	}, nil)
+
+	topic, err := svc.CreateTopic(ctx, subjectID, name)
+
+	assert.NoError(t, err)
+	assert.Equal(t, name, topic.Name)
+	assert.Equal(t, subjectID, topic.SubjectID)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestTopicManager_GetTopic(t *testing.T) {
+	mockRepo := new(MockTopicRepository)
+	svc := service.NewTopicManager(mockRepo)
+
+	ctx := context.Background()
+	topicID := "topic-uuid"
+	expectedTopic := database.Topic{ID: topicID, Name: "Algebra"}
+
+	mockRepo.On("GetTopic", ctx, topicID).Return(expectedTopic, nil)
+
+	topic, err := svc.GetTopic(ctx, topicID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expectedTopic.Name, topic.Name)
+	mockRepo.AssertExpectations(t)
+}
+
+```
+
+--- 
+
 **File:** `internal/service/user_service.go`
 
 ```typescript
@@ -8488,6 +9879,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/repository"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -8495,9 +9887,8 @@ var (
 	ErrEmailTaken   = errors.New("email already taken")
 )
 
-// UserService defines the business logic behavior
 type UserService interface {
-	CreateUser(ctx context.Context, email, name string) (database.User, error)
+	CreateUser(ctx context.Context, email, name, password string) (database.User, error)
 	GetUserByEmail(ctx context.Context, email string) (database.User, error)
 }
 
@@ -8510,14 +9901,20 @@ func NewUserManager(repo repository.UserRepository) *UserManager {
 	return &UserManager{repo: repo}
 }
 
-func (s *UserManager) CreateUser(ctx context.Context, email, name string) (database.User, error) {
+func (s *UserManager) CreateUser(ctx context.Context, email, name, password string) (database.User, error) {
 	// Logic: Generate UUID here, not in the handler
 	id := uuid.New().String()
 
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return database.User{}, err
+	}
+
 	user, err := s.repo.CreateUser(ctx, database.CreateUserParams{
-		ID:    id,
-		Email: email,
-		Name:  name,
+		ID:           id,
+		Email:        email,
+		Name:         name,
+		PasswordHash: string(hashedPassword),
 	})
 	if err != nil {
 		// In a real app, check for specific DB errors (like unique constraint violation)
@@ -8535,6 +9932,72 @@ func (s *UserManager) GetUserByEmail(ctx context.Context, email string) (databas
 		return database.User{}, err
 	}
 	return user, nil
+}
+
+```
+
+--- 
+
+**File:** `internal/service/user_service_test.go`
+
+```typescript
+package service_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/joaoapaenas/my-api/internal/database"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// MockUserRepository is a mock implementation of repository.UserRepository
+type MockUserRepository struct {
+	mock.Mock
+}
+
+func (m *MockUserRepository) CreateUser(ctx context.Context, arg database.CreateUserParams) (database.User, error) {
+	args := m.Called(ctx, arg)
+	return args.Get(0).(database.User), args.Error(1)
+}
+
+func (m *MockUserRepository) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
+	args := m.Called(ctx, email)
+	return args.Get(0).(database.User), args.Error(1)
+}
+
+func TestUserManager_CreateUser(t *testing.T) {
+	mockRepo := new(MockUserRepository)
+	svc := service.NewUserManager(mockRepo)
+
+	ctx := context.Background()
+	email := "test@example.com"
+	name := "Test User"
+	password := "password123"
+
+	mockRepo.On("CreateUser", ctx, mock.MatchedBy(func(arg database.CreateUserParams) bool {
+		// Verify arguments
+		if arg.Email != email || arg.Name != name {
+			return false
+		}
+		// Verify password is hashed
+		err := bcrypt.CompareHashAndPassword([]byte(arg.PasswordHash), []byte(password))
+		return err == nil
+	})).Return(database.User{
+		ID:    "uuid",
+		Email: email,
+		Name:  name,
+	}, nil)
+
+	user, err := svc.CreateUser(ctx, email, name, password)
+
+	assert.NoError(t, err)
+	assert.Equal(t, email, user.Email)
+	assert.Equal(t, name, user.Name)
+	mockRepo.AssertExpectations(t)
 }
 
 ```

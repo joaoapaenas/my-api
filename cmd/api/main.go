@@ -183,10 +183,10 @@ func main() {
 	// Analytics routes
 	r.Route("/analytics", func(r chi.Router) {
 		r.Use(basicAuth.BasicAuth)
-		r.Get("/time-by-subject", analyticsHandler.GetTimeReportBySubject)
-		r.Get("/accuracy-by-subject", analyticsHandler.GetAccuracyBySubject)
-		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetAccuracyByTopic)
-		r.Get("/heatmap", analyticsHandler.GetActivityHeatmap)
+		r.Get("/time-by-subject", analyticsHandler.GetTimeReport)
+		r.Get("/accuracy-by-subject", analyticsHandler.GetGlobalAccuracy)
+		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetWeakPoints)
+		r.Get("/heatmap", analyticsHandler.GetHeatmap)
 	})
 
 	// 5. Server

@@ -15,6 +15,126 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/analytics/accuracy-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by subject",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.AccuracyReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/accuracy-by-topic/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get accuracy report by topic for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/heatmap": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get activity heatmap data",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Number of days",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.HeatmapDayResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/time-by-subject": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get time tracking report by subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/cycle-items/{id}": {
             "get": {
                 "produces": [
@@ -355,6 +475,28 @@ const docTemplate = `{
                 }
             }
         },
+        "/study-cycles/active/items": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_cycles"
+                ],
+                "summary": "Get active cycle with all items (round-robin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.CycleItemWithSubjectResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/study-cycles/{id}": {
             "get": {
                 "produces": [
@@ -538,6 +680,25 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/handler.StudySessionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/study-sessions/open": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "study_sessions"
+                ],
+                "summary": "Get open/unfinished session (crash recovery)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.OpenSessionResponse"
                         }
                     }
                 }
@@ -1019,6 +1180,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.AccuracyReportResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "color_hex": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
+                }
+            }
+        },
         "handler.CreateCycleItemRequest": {
             "type": "object",
             "required": [
@@ -1188,6 +1372,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.CycleItemWithSubjectResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "order_index": {
+                    "type": "integer"
+                },
+                "planned_duration_minutes": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.EndSessionPauseRequest": {
             "type": "object",
             "required": [
@@ -1221,6 +1428,43 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "topic_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.HeatmapDayResponse": {
+            "type": "object",
+            "properties": {
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "study_date": {
+                    "type": "string"
+                },
+                "total_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.OpenSessionResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "cycle_item_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
                     "type": "string"
                 }
             }
@@ -1317,6 +1561,46 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "handler.TimeReportResponse": {
+            "type": "object",
+            "properties": {
+                "color_hex": {
+                    "type": "string"
+                },
+                "sessions_count": {
+                    "type": "integer"
+                },
+                "subject_id": {
+                    "type": "string"
+                },
+                "subject_name": {
+                    "type": "string"
+                },
+                "total_hours_net": {
+                    "type": "number"
+                }
+            }
+        },
+        "handler.TopicAccuracyResponse": {
+            "type": "object",
+            "properties": {
+                "accuracy_percentage": {
+                    "type": "number"
+                },
+                "topic_id": {
+                    "type": "string"
+                },
+                "topic_name": {
+                    "type": "string"
+                },
+                "total_correct": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer"
                 }
             }
         },

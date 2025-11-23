@@ -11,6 +11,21 @@ definitions:
       name:
         type: string
     type: object
+  handler.AccuracyReportResponse:
+    properties:
+      accuracy_percentage:
+        type: number
+      color_hex:
+        type: string
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+      total_correct:
+        type: integer
+      total_questions:
+        type: integer
+    type: object
   handler.CreateCycleItemRequest:
     properties:
       order_index:
@@ -128,6 +143,21 @@ definitions:
       updated_at:
         type: string
     type: object
+  handler.CycleItemWithSubjectResponse:
+    properties:
+      color_hex:
+        type: string
+      cycle_item_id:
+        type: string
+      order_index:
+        type: integer
+      planned_duration_minutes:
+        type: integer
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+    type: object
   handler.EndSessionPauseRequest:
     properties:
       ended_at:
@@ -150,6 +180,30 @@ definitions:
       subject_id:
         type: string
       topic_id:
+        type: string
+    type: object
+  handler.HeatmapDayResponse:
+    properties:
+      sessions_count:
+        type: integer
+      study_date:
+        type: string
+      total_seconds:
+        type: integer
+    type: object
+  handler.OpenSessionResponse:
+    properties:
+      color_hex:
+        type: string
+      cycle_item_id:
+        type: string
+      id:
+        type: string
+      started_at:
+        type: string
+      subject_id:
+        type: string
+      subject_name:
         type: string
     type: object
   handler.SessionPauseResponse:
@@ -213,6 +267,32 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  handler.TimeReportResponse:
+    properties:
+      color_hex:
+        type: string
+      sessions_count:
+        type: integer
+      subject_id:
+        type: string
+      subject_name:
+        type: string
+      total_hours_net:
+        type: number
+    type: object
+  handler.TopicAccuracyResponse:
+    properties:
+      accuracy_percentage:
+        type: number
+      topic_id:
+        type: string
+      topic_name:
+        type: string
+      total_correct:
+        type: integer
+      total_questions:
+        type: integer
     type: object
   handler.TopicResponse:
     properties:
@@ -291,6 +371,83 @@ info:
   title: My Go API
   version: "1.0"
 paths:
+  /analytics/accuracy-by-subject:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.AccuracyReportResponse'
+            type: array
+      summary: Get accuracy report by subject
+      tags:
+      - analytics
+  /analytics/accuracy-by-topic/{subject_id}:
+    get:
+      parameters:
+      - description: Subject ID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TopicAccuracyResponse'
+            type: array
+      summary: Get accuracy report by topic for a subject
+      tags:
+      - analytics
+  /analytics/heatmap:
+    get:
+      parameters:
+      - default: 30
+        description: Number of days
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.HeatmapDayResponse'
+            type: array
+      summary: Get activity heatmap data
+      tags:
+      - analytics
+  /analytics/time-by-subject:
+    get:
+      parameters:
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TimeReportResponse'
+            type: array
+      summary: Get time tracking report by subject
+      tags:
+      - analytics
   /cycle-items/{id}:
     delete:
       parameters:
@@ -611,6 +768,20 @@ paths:
       summary: Get the active study cycle
       tags:
       - study_cycles
+  /study-cycles/active/items:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.CycleItemWithSubjectResponse'
+            type: array
+      summary: Get active cycle with all items (round-robin)
+      tags:
+      - study_cycles
   /study-sessions:
     post:
       consumes:
@@ -686,6 +857,18 @@ paths:
           schema:
             type: string
       summary: Update study session duration
+      tags:
+      - study_sessions
+  /study-sessions/open:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OpenSessionResponse'
+      summary: Get open/unfinished session (crash recovery)
       tags:
       - study_sessions
   /subjects:

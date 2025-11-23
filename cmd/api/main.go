@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/handler"
 	"github.com/joaoapaenas/my-api/internal/logger"
+	customMiddleware "github.com/joaoapaenas/my-api/internal/middleware"
 	"github.com/joaoapaenas/my-api/internal/repository"
 	"github.com/joaoapaenas/my-api/internal/service"
 
@@ -34,7 +34,8 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("Failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Init(cfg.Env)
@@ -97,7 +98,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(customMiddleware.RequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 

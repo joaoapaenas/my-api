@@ -24,12 +24,16 @@ func NewAnalyticsManager(repo repository.AnalyticsRepository) *AnalyticsManager 
 
 func (s *AnalyticsManager) GetTimeReportBySubject(ctx context.Context, startDate, endDate string) ([]database.GetTimeReportBySubjectRow, error) {
 	// Prepare parameters for the query
-	// Empty strings mean no filter
+	// Mapping based on internal/database/analytics.sql.go:
+	// ? (1) -> Column1 (interface{})   : Check if empty
+	// ? (2) -> StartedAt (string)      : Actual filter
+	// ? (3) -> Column3 (interface{})   : Check if empty
+	// ? (4) -> StartedAt_2 (string)    : Actual filter
 	return s.repo.GetTimeReportBySubject(ctx, database.GetTimeReportBySubjectParams{
-		Column1: startDate,
-		Column2: startDate,
-		Column3: endDate,
-		Column4: endDate,
+		Column1:     startDate,
+		StartedAt:   startDate,
+		Column3:     endDate,
+		StartedAt_2: endDate,
 	})
 }
 

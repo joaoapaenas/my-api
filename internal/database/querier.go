@@ -29,7 +29,7 @@ type Querier interface {
 	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]GetAccuracyByTopicRow, error)
 	GetActiveCycleWithItems(ctx context.Context) ([]GetActiveCycleWithItemsRow, error)
 	GetActiveStudyCycle(ctx context.Context) (StudyCycle, error)
-	GetActivityHeatmap(ctx context.Context, dollar_1 string) ([]GetActivityHeatmapRow, error)
+	GetActivityHeatmap(ctx context.Context, daysCount string) ([]GetActivityHeatmapRow, error)
 	GetCycleItem(ctx context.Context, id string) (CycleItem, error)
 	GetExerciseLog(ctx context.Context, id string) (ExerciseLog, error)
 	GetOpenSession(ctx context.Context) (GetOpenSessionRow, error)

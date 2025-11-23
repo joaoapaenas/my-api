@@ -10,8 +10,8 @@ SELECT
 FROM subjects s
 LEFT JOIN study_sessions ss ON s.id = ss.subject_id 
     AND ss.finished_at IS NOT NULL
-    AND (? = '' OR ss.started_at >= ?)
-    AND (? = '' OR ss.started_at <= ?)
+    AND (sqlc.arg(start_date_from) = '' OR ss.started_at >= sqlc.arg(start_date_from))
+    AND (sqlc.arg(start_date_to) = '' OR ss.started_at <= sqlc.arg(start_date_to))
 WHERE s.deleted_at IS NULL
 GROUP BY s.id, s.name, s.color_hex
 HAVING sessions_count > 0
@@ -60,6 +60,6 @@ SELECT
     COALESCE(SUM(net_duration_seconds), 0) AS total_seconds
 FROM study_sessions
 WHERE finished_at IS NOT NULL
-  AND datetime(started_at) >= datetime('now', '-' || CAST(? AS TEXT) || ' days')
+  AND datetime(started_at) >= datetime('now', '-' || CAST(sqlc.arg(days_count) AS TEXT) || ' days')
 GROUP BY study_date
 ORDER BY study_date DESC;

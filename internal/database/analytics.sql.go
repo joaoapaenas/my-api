@@ -131,7 +131,7 @@ SELECT
     COALESCE(SUM(net_duration_seconds), 0) AS total_seconds
 FROM study_sessions
 WHERE finished_at IS NOT NULL
-  AND datetime(started_at) >= datetime('now', '-' || CAST(? AS TEXT) || ' days')
+  AND datetime(started_at) >= datetime('now', '-' || CAST(?1 AS TEXT) || ' days')
 GROUP BY study_date
 ORDER BY study_date DESC
 `
@@ -142,8 +142,8 @@ type GetActivityHeatmapRow struct {
 	TotalSeconds  interface{} `json:"total_seconds"`
 }
 
-func (q *Queries) GetActivityHeatmap(ctx context.Context, dollar_1 string) ([]GetActivityHeatmapRow, error) {
-	rows, err := q.db.QueryContext(ctx, getActivityHeatmap, dollar_1)
+func (q *Queries) GetActivityHeatmap(ctx context.Context, daysCount string) ([]GetActivityHeatmapRow, error) {
+	rows, err := q.db.QueryContext(ctx, getActivityHeatmap, daysCount)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +176,8 @@ SELECT
 FROM subjects s
 LEFT JOIN study_sessions ss ON s.id = ss.subject_id 
     AND ss.finished_at IS NOT NULL
-    AND (? = '' OR ss.started_at >= ?)
-    AND (? = '' OR ss.started_at <= ?)
+    AND (?1 = '' OR ss.started_at >= ?1)
+    AND (?2 = '' OR ss.started_at <= ?2)
 WHERE s.deleted_at IS NULL
 GROUP BY s.id, s.name, s.color_hex
 HAVING sessions_count > 0
@@ -185,10 +185,8 @@ ORDER BY total_hours_net DESC
 `
 
 type GetTimeReportBySubjectParams struct {
-	Column1     interface{} `json:"column_1"`
-	StartedAt   string      `json:"started_at"`
-	Column3     interface{} `json:"column_3"`
-	StartedAt_2 string      `json:"started_at_2"`
+	StartDateFrom interface{} `json:"start_date_from"`
+	StartDateTo   interface{} `json:"start_date_to"`
 }
 
 type GetTimeReportBySubjectRow struct {
@@ -201,12 +199,7 @@ type GetTimeReportBySubjectRow struct {
 
 // Analytics Queries for Study App
 func (q *Queries) GetTimeReportBySubject(ctx context.Context, arg GetTimeReportBySubjectParams) ([]GetTimeReportBySubjectRow, error) {
-	rows, err := q.db.QueryContext(ctx, getTimeReportBySubject,
-		arg.Column1,
-		arg.StartedAt,
-		arg.Column3,
-		arg.StartedAt_2,
-	)
+	rows, err := q.db.QueryContext(ctx, getTimeReportBySubject, arg.StartDateFrom, arg.StartDateTo)
 	if err != nil {
 		return nil, err
 	}

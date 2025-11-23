@@ -2,16 +2,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/joaoapaenas/my-api/internal/database"
 	"github.com/joaoapaenas/my-api/internal/repository"
 )
 
 type AnalyticsService interface {
-	GetTimeReportBySubject(ctx context.Context, startDate, endDate string) ([]database.GetTimeReportBySubjectRow, error)
-	GetAccuracyBySubject(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error)
-	GetAccuracyByTopic(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error)
-	GetActivityHeatmap(ctx context.Context, days int) ([]database.GetActivityHeatmapRow, error)
+	GetTimeReport(ctx context.Context, startDateFrom, startDateTo string) ([]database.GetTimeReportBySubjectRow, error)
+	GetGlobalAccuracy(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error)
+	GetWeakPoints(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error)
+	GetHeatmap(ctx context.Context, daysCount int64) ([]database.GetActivityHeatmapRow, error)
 }
 
 type AnalyticsManager struct {
@@ -22,29 +23,25 @@ func NewAnalyticsManager(repo repository.AnalyticsRepository) *AnalyticsManager 
 	return &AnalyticsManager{repo: repo}
 }
 
-func (s *AnalyticsManager) GetTimeReportBySubject(ctx context.Context, startDate, endDate string) ([]database.GetTimeReportBySubjectRow, error) {
-	// Prepare parameters for the query
-	// Mapping based on internal/database/analytics.sql.go:
-	// ? (1) -> Column1 (interface{})   : Check if empty
-	// ? (2) -> StartedAt (string)      : Actual filter
-	// ? (3) -> Column3 (interface{})   : Check if empty
-	// ? (4) -> StartedAt_2 (string)    : Actual filter
+func (s *AnalyticsManager) GetTimeReport(ctx context.Context, startDateFrom, startDateTo string) ([]database.GetTimeReportBySubjectRow, error) {
 	return s.repo.GetTimeReportBySubject(ctx, database.GetTimeReportBySubjectParams{
-		Column1:     startDate,
-		StartedAt:   startDate,
-		Column3:     endDate,
-		StartedAt_2: endDate,
+		StartDateFrom: startDateFrom,
+		StartDateTo:   startDateTo,
 	})
 }
 
-func (s *AnalyticsManager) GetAccuracyBySubject(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error) {
+func (s *AnalyticsManager) GetGlobalAccuracy(ctx context.Context) ([]database.GetAccuracyBySubjectRow, error) {
 	return s.repo.GetAccuracyBySubject(ctx)
 }
 
-func (s *AnalyticsManager) GetAccuracyByTopic(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error) {
+func (s *AnalyticsManager) GetWeakPoints(ctx context.Context, subjectID string) ([]database.GetAccuracyByTopicRow, error) {
 	return s.repo.GetAccuracyByTopic(ctx, subjectID)
 }
 
-func (s *AnalyticsManager) GetActivityHeatmap(ctx context.Context, days int) ([]database.GetActivityHeatmapRow, error) {
-	return s.repo.GetActivityHeatmap(ctx, int64(days))
+func (s *AnalyticsManager) GetHeatmap(ctx context.Context, daysCount int64) ([]database.GetActivityHeatmapRow, error) {
+	// Default to 30 days if 0 or negative
+	if daysCount <= 0 {
+		daysCount = 30
+	}
+	return s.repo.GetActivityHeatmap(ctx, fmt.Sprintf("%d", daysCount))
 }

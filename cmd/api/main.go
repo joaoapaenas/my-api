@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,7 +44,6 @@ func main() {
 	slog.Info("Starting application", "env", cfg.Env, "port", cfg.Port)
 
 	// 1. Open Database
-	// using the Safe Mode URL from config
 	db, err := sql.Open("sqlite", cfg.DBUrl)
 	if err != nil {
 		slog.Error("Failed to initialize db driver", "error", err)
@@ -51,7 +52,6 @@ func main() {
 	defer db.Close()
 
 	// 2. Verify Connection
-	// This triggers the actual file open and pragma application
 	if err := db.Ping(); err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
@@ -84,6 +84,7 @@ func main() {
 	analyticsService := service.NewAnalyticsManager(analyticsRepo)
 
 	// Handlers
+	authHandler := handler.NewAuthHandler(userService, cfg)
 	userHandler := handler.NewUserHandler(userService)
 	subjectHandler := handler.NewSubjectHandler(subjectService)
 	topicHandler := handler.NewTopicHandler(topicService)
@@ -102,6 +103,10 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	// Middleware Initialization (JWT)
+	jwtAuth := customMiddleware.NewJWTAuthMiddleware(cfg)
+
+	// Documentation Routes
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		doc := docs.SwaggerInfo.ReadDoc()
 		w.Header().Set("Content-Type", "application/json")
@@ -111,16 +116,26 @@ func main() {
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
-	// Middleware
-	basicAuth := customMiddleware.NewBasicAuthMiddleware(userService)
+	// --- Public Routes ---
+
+	// Authentication (Added this line to fix the error)
+	r.Post("/login", authHandler.Login)
 
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
+
+		// Protected route
+		r.Group(func(r chi.Router) {
+			r.Use(jwtAuth.Protected)
+			r.Put("/password", userHandler.ChangePassword)
+		})
 	})
 
+	// --- Protected Routes (Require Valid JWT) ---
+
 	r.Route("/subjects", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", subjectHandler.CreateSubject)
 		r.Get("/", subjectHandler.ListSubjects)
 		r.Get("/{id}", subjectHandler.GetSubject)
@@ -131,17 +146,17 @@ func main() {
 	})
 
 	r.Route("/topics", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Get("/{id}", topicHandler.GetTopic)
 		r.Put("/{id}", topicHandler.UpdateTopic)
 		r.Delete("/{id}", topicHandler.DeleteTopic)
 	})
 
 	r.Route("/study-cycles", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
-		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems) // Round-robin
+		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems)
 		r.Get("/{id}", studyCycleHandler.GetStudyCycle)
 		r.Put("/{id}", studyCycleHandler.UpdateStudyCycle)
 		r.Delete("/{id}", studyCycleHandler.DeleteStudyCycle)
@@ -150,23 +165,23 @@ func main() {
 	})
 
 	r.Route("/cycle-items", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Get("/{id}", cycleItemHandler.GetCycleItem)
 		r.Put("/{id}", cycleItemHandler.UpdateCycleItem)
 		r.Delete("/{id}", cycleItemHandler.DeleteCycleItem)
 	})
 
 	r.Route("/study-sessions", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", studySessionHandler.CreateStudySession)
-		r.Get("/open", studySessionHandler.GetOpenSession) // Crash recovery
+		r.Get("/open", studySessionHandler.GetOpenSession)
 		r.Get("/{id}", studySessionHandler.GetStudySession)
 		r.Put("/{id}", studySessionHandler.UpdateSessionDuration)
 		r.Delete("/{id}", studySessionHandler.DeleteStudySession)
 	})
 
 	r.Route("/session-pauses", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", sessionPauseHandler.CreateSessionPause)
 		r.Get("/{id}", sessionPauseHandler.GetSessionPause)
 		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
@@ -174,7 +189,7 @@ func main() {
 	})
 
 	r.Route("/exercise-logs", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
 		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
@@ -182,12 +197,17 @@ func main() {
 
 	// Analytics routes
 	r.Route("/analytics", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Get("/time-by-subject", analyticsHandler.GetTimeReport)
 		r.Get("/accuracy-by-subject", analyticsHandler.GetGlobalAccuracy)
 		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetWeakPoints)
 		r.Get("/heatmap", analyticsHandler.GetHeatmap)
 	})
+
+	// Serve Static Web Files
+	workDir, _ := os.Getwd()
+	filesDir := http.Dir(filepath.Join(workDir, "assets"))
+	FileServer(r, "/", filesDir)
 
 	// 5. Server
 	srv := &http.Server{
@@ -218,4 +238,24 @@ func main() {
 	}
 
 	slog.Info("Server exited properly")
+}
+
+// FileServer convenience helper to serve static files
+func FileServer(r chi.Router, path string, root http.FileSystem) {
+	if strings.ContainsAny(path, "{}*") {
+		panic("FileServer does not permit any URL parameters.")
+	}
+
+	if path != "/" && path[len(path)-1] != '/' {
+		r.Get(path, http.RedirectHandler(path+"/", http.StatusMovedPermanently).ServeHTTP)
+		path += "/"
+	}
+	path += "*"
+
+	r.Get(path, func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.RouteContext(r.Context())
+		pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
+		fs := http.StripPrefix(pathPrefix, http.FileServer(root))
+		fs.ServeHTTP(w, r)
+	})
 }

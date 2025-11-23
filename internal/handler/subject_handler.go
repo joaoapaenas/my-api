@@ -37,6 +37,13 @@ type UpdateSubjectRequest struct {
 // @Success 201 {object} handler.SubjectResponse
 // @Router /subjects [post]
 func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	var req CreateSubjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
@@ -51,7 +58,8 @@ func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subject, err := h.svc.CreateSubject(r.Context(), req.Name, req.ColorHex)
+	// 2. Pass userID to Service
+	subject, err := h.svc.CreateSubject(r.Context(), userID.(string), req.Name, req.ColorHex)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -67,7 +75,15 @@ func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} handler.SubjectResponse
 // @Router /subjects [get]
 func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
-	subjects, err := h.svc.ListSubjects(r.Context())
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	// 2. Pass userID to Service
+	subjects, err := h.svc.ListSubjects(r.Context(), userID.(string))
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -84,14 +100,23 @@ func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} handler.SubjectResponse
 // @Router /subjects/{id} [get]
 func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
 		return
 	}
 
-	subject, err := h.svc.GetSubject(r.Context(), id)
+	// 2. Pass userID to Service
+	subject, err := h.svc.GetSubject(r.Context(), id, userID.(string))
 	if err != nil {
+		// If DB returns nothing because userID didn't match, it looks like a generic "Not Found", which is correct security.
 		h.respondWithError(w, http.StatusNotFound, "Subject not found")
 		return
 	}
@@ -109,6 +134,13 @@ func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "OK"
 // @Router /subjects/{id} [put]
 func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
@@ -129,7 +161,8 @@ func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.UpdateSubject(r.Context(), id, req.Name, req.ColorHex)
+	// 2. Pass userID to Service
+	err := h.svc.UpdateSubject(r.Context(), id, userID.(string), req.Name, req.ColorHex)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -145,13 +178,21 @@ func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 204
 // @Router /subjects/{id} [delete]
 func (h *SubjectHandler) DeleteSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
 		return
 	}
 
-	err := h.svc.DeleteSubject(r.Context(), id)
+	// 2. Pass userID to Service
+	err := h.svc.DeleteSubject(r.Context(), id, userID.(string))
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return

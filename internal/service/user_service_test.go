@@ -26,6 +26,11 @@ func (m *MockUserRepository) GetUserByEmail(ctx context.Context, email string) (
 	return args.Get(0).(database.User), args.Error(1)
 }
 
+func (m *MockUserRepository) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	args := m.Called(ctx, id, passwordHash)
+	return args.Error(0)
+}
+
 func TestUserManager_CreateUser(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	svc := service.NewUserManager(mockRepo)

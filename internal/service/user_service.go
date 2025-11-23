@@ -18,6 +18,7 @@ var (
 type UserService interface {
 	CreateUser(ctx context.Context, email, name, password string) (database.User, error)
 	GetUserByEmail(ctx context.Context, email string) (database.User, error)
+	UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error
 }
 
 // UserManager implements UserService
@@ -45,8 +46,7 @@ func (s *UserManager) CreateUser(ctx context.Context, email, name, password stri
 		PasswordHash: string(hashedPassword),
 	})
 	if err != nil {
-		// In a real app, check for specific DB errors (like unique constraint violation)
-		// and return ErrEmailTaken. For now, we return the raw error.
+		// In a real app, check for specific DB errors
 		return database.User{}, err
 	}
 	return user, nil
@@ -55,9 +55,29 @@ func (s *UserManager) CreateUser(ctx context.Context, email, name, password stri
 func (s *UserManager) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
-		// Assuming standard sql.ErrNoRows check happens here or in repo
-		// Ideally, you map sql.ErrNoRows -> ErrUserNotFound here
 		return database.User{}, err
 	}
 	return user, nil
+}
+
+func (s *UserManager) UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error {
+	// 1. Get User
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+
+	// 2. Verify Old Password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return errors.New("invalid old password")
+	}
+
+	// 3. Hash New Password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	// 4. Update in DB
+	return s.repo.UpdateUserPassword(ctx, user.ID, string(newHash))
 }

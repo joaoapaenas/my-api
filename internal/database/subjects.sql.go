@@ -11,19 +11,25 @@ import (
 )
 
 const createSubject = `-- name: CreateSubject :one
-INSERT INTO subjects (id, name, color_hex)
-VALUES (?, ?, ?)
-RETURNING id, name, color_hex, created_at, updated_at, deleted_at
+INSERT INTO subjects (id, user_id, name, color_hex)
+VALUES (?, ?, ?, ?)
+RETURNING id, name, color_hex, created_at, updated_at, deleted_at, user_id
 `
 
 type CreateSubjectParams struct {
 	ID       string         `json:"id"`
+	UserID   string         `json:"user_id"`
 	Name     string         `json:"name"`
 	ColorHex sql.NullString `json:"color_hex"`
 }
 
 func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error) {
-	row := q.db.QueryRowContext(ctx, createSubject, arg.ID, arg.Name, arg.ColorHex)
+	row := q.db.QueryRowContext(ctx, createSubject,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.ColorHex,
+	)
 	var i Subject
 	err := row.Scan(
 		&i.ID,
@@ -32,6 +38,7 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -39,21 +46,31 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 const deleteSubject = `-- name: DeleteSubject :exec
 UPDATE subjects
 SET deleted_at = datetime('now')
-WHERE id = ?
+WHERE id = ? AND user_id = ?
 `
 
-func (q *Queries) DeleteSubject(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteSubject, id)
+type DeleteSubjectParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) DeleteSubject(ctx context.Context, arg DeleteSubjectParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSubject, arg.ID, arg.UserID)
 	return err
 }
 
 const getSubject = `-- name: GetSubject :one
-SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
-WHERE id = ? AND deleted_at IS NULL
+SELECT id, name, color_hex, created_at, updated_at, deleted_at, user_id FROM subjects
+WHERE id = ? AND user_id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
-	row := q.db.QueryRowContext(ctx, getSubject, id)
+type GetSubjectParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) GetSubject(ctx context.Context, arg GetSubjectParams) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, getSubject, arg.ID, arg.UserID)
 	var i Subject
 	err := row.Scan(
 		&i.ID,
@@ -62,18 +79,19 @@ func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listSubjects = `-- name: ListSubjects :many
-SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
-WHERE deleted_at IS NULL
+SELECT id, name, color_hex, created_at, updated_at, deleted_at, user_id FROM subjects
+WHERE user_id = ? AND deleted_at IS NULL
 ORDER BY name
 `
 
-func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
-	rows, err := q.db.QueryContext(ctx, listSubjects)
+func (q *Queries) ListSubjects(ctx context.Context, userID string) ([]Subject, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjects, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +106,7 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -105,16 +124,22 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 const updateSubject = `-- name: UpdateSubject :exec
 UPDATE subjects
 SET name = ?, color_hex = ?, updated_at = datetime('now')
-WHERE id = ? AND deleted_at IS NULL
+WHERE id = ? AND user_id = ? AND deleted_at IS NULL
 `
 
 type UpdateSubjectParams struct {
 	Name     string         `json:"name"`
 	ColorHex sql.NullString `json:"color_hex"`
 	ID       string         `json:"id"`
+	UserID   string         `json:"user_id"`
 }
 
 func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) error {
-	_, err := q.db.ExecContext(ctx, updateSubject, arg.Name, arg.ColorHex, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateSubject,
+		arg.Name,
+		arg.ColorHex,
+		arg.ID,
+		arg.UserID,
+	)
 	return err
 }

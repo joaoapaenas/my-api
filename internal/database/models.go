@@ -29,6 +29,13 @@ type ExerciseLog struct {
 	CreatedAt      string         `json:"created_at"`
 }
 
+type PasswordResetToken struct {
+	TokenHash string       `json:"token_hash"`
+	UserID    string       `json:"user_id"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	Used      sql.NullBool `json:"used"`
+}
+
 type SessionPause struct {
 	ID              string         `json:"id"`
 	SessionID       string         `json:"session_id"`
@@ -67,6 +74,7 @@ type Subject struct {
 	CreatedAt string         `json:"created_at"`
 	UpdatedAt string         `json:"updated_at"`
 	DeletedAt sql.NullString `json:"deleted_at"`
+	UserID    string         `json:"user_id"`
 }
 
 type Topic struct {

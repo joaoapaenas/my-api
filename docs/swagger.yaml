@@ -10,6 +10,8 @@ definitions:
         type: string
       name:
         type: string
+      password_hash:
+        type: string
     type: object
   handler.AccuracyReportResponse:
     properties:
@@ -25,6 +27,17 @@ definitions:
         type: integer
       total_questions:
         type: integer
+    type: object
+  handler.ChangePasswordRequest:
+    properties:
+      new_password:
+        minLength: 6
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
     type: object
   handler.CreateCycleItemRequest:
     properties:
@@ -114,17 +127,17 @@ definitions:
   handler.CreateUserRequest:
     properties:
       email:
-        description: |-
-          required: cannot be empty
-          email: must be a valid email format
         type: string
       name:
-        description: 'min=2: must be at least 2 chars'
         minLength: 2
+        type: string
+      password:
+        minLength: 6
         type: string
     required:
     - email
     - name
+    - password
     type: object
   handler.CycleItemResponse:
     properties:
@@ -190,6 +203,11 @@ definitions:
         type: string
       total_seconds:
         type: integer
+    type: object
+  handler.MessageResponse:
+    properties:
+      message:
+        type: string
     type: object
   handler.OpenSessionResponse:
     properties:
@@ -371,7 +389,7 @@ info:
   title: My Go API
   version: "1.0"
 paths:
-  /analytics/accuracy-by-subject:
+  /analytics/accuracy:
     get:
       produces:
       - application/json
@@ -382,10 +400,52 @@ paths:
             items:
               $ref: '#/definitions/handler.AccuracyReportResponse'
             type: array
-      summary: Get accuracy report by subject
+      summary: Get global accuracy by subject
       tags:
       - analytics
-  /analytics/accuracy-by-topic/{subject_id}:
+  /analytics/heatmap:
+    get:
+      parameters:
+      - description: Number of days (default 30)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.HeatmapDayResponse'
+            type: array
+      summary: Get study activity heatmap
+      tags:
+      - analytics
+  /analytics/time-report:
+    get:
+      parameters:
+      - description: Start Date From (YYYY-MM-DD)
+        in: query
+        name: start_date_from
+        type: string
+      - description: Start Date To (YYYY-MM-DD)
+        in: query
+        name: start_date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TimeReportResponse'
+            type: array
+      summary: Get net study time report by subject
+      tags:
+      - analytics
+  /analytics/weak-points/{subject_id}:
     get:
       parameters:
       - description: Subject ID
@@ -402,50 +462,7 @@ paths:
             items:
               $ref: '#/definitions/handler.TopicAccuracyResponse'
             type: array
-      summary: Get accuracy report by topic for a subject
-      tags:
-      - analytics
-  /analytics/heatmap:
-    get:
-      parameters:
-      - default: 30
-        description: Number of days
-        in: query
-        name: days
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/handler.HeatmapDayResponse'
-            type: array
-      summary: Get activity heatmap data
-      tags:
-      - analytics
-  /analytics/time-by-subject:
-    get:
-      parameters:
-      - description: Start date (YYYY-MM-DD)
-        in: query
-        name: start_date
-        type: string
-      - description: End date (YYYY-MM-DD)
-        in: query
-        name: end_date
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/handler.TimeReportResponse'
-            type: array
-      summary: Get time tracking report by subject
+      summary: Get weak points (accuracy by topic) for a subject
       tags:
       - analytics
   /cycle-items/{id}:
@@ -1066,7 +1083,6 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a user with email and name
       parameters:
       - description: User info
         in: body
@@ -1081,14 +1097,6 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/database.User'
-        "400":
-          description: Invalid request
-          schema:
-            type: string
-        "500":
-          description: Internal server error
-          schema:
-            type: string
       summary: Create a new user
       tags:
       - users
@@ -1105,11 +1113,28 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/database.User'
-        "404":
-          description: User not found
-          schema:
-            type: string
       summary: Get user by Email
+      tags:
+      - users
+  /users/password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Password info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.MessageResponse'
+      summary: Change user password
       tags:
       - users
 swagger: "2.0"

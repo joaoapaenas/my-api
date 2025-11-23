@@ -21,31 +21,30 @@ func NewUserHandler(svc service.UserService) *UserHandler {
 	return &UserHandler{svc: svc, validate: validator.New()}
 }
 
+// --- Structs ---
+
 type CreateUserRequest struct {
-	// required: cannot be empty
-	// email: must be a valid email format
-	Email string `json:"email" validate:"required,email"`
-
-	// min=2: must be at least 2 chars
-	Name string `json:"name" validate:"required,min=2"`
-
-	// min=6: must be at least 6 chars
+	Email    string `json:"email" validate:"required,email"`
+	Name     string `json:"name" validate:"required,min=2"`
 	Password string `json:"password" validate:"required,min=6"`
 }
 
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=6"`
+}
+
+// --- Handlers ---
+
 // CreateUser godoc
 // @Summary Create a new user
-// @Description Create a user with email and name
 // @Tags users
 // @Accept json
 // @Produce json
 // @Param input body CreateUserRequest true "User info"
 // @Success 201 {object} database.User
-// @Failure 400 {string} string "Invalid request"
-// @Failure 500 {string} string "Internal server error"
 // @Router /users [post]
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// 1. Decode & Basic Validation
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
@@ -53,25 +52,19 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.validate.Struct(req); err != nil {
-		// Return friendly validation errors
-		validationErrors := formatValidationErrors(err)
 		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"error":   "Validation failed",
-			"details": validationErrors,
+			"details": formatValidationErrors(err),
 		})
 		return
 	}
 
-	// 2. Call Service (Business Logic)
-	// Notice: We don't generate UUIDs here anymore.
 	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
-		// Check for specific domain errors if you defined them
 		if errors.Is(err, service.ErrEmailTaken) {
 			h.respondWithError(w, http.StatusConflict, "Email already exists")
 			return
 		}
-
 		slog.Error("Failed to create user", "error", err)
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -85,14 +78,12 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 // @Tags users
 // @Param email path string true "User Email"
 // @Success 200 {object} database.User
-// @Failure 404 {string} string "User not found"
 // @Router /users/{email} [get]
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	email := chi.URLParam(r, "email")
 
 	user, err := h.svc.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		// Handle "Not Found" specifically
 		if err == sql.ErrNoRows || errors.Is(err, service.ErrUserNotFound) {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
@@ -102,6 +93,48 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(user)
+}
+
+// ChangePassword godoc
+// @Summary Change user password
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param input body ChangePasswordRequest true "Password info"
+// @Success 200 {object} handler.MessageResponse
+// @Router /users/password [put]
+func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	// Extract email from context (set by JWT middleware)
+	// We cast to string safely
+	emailVal := r.Context().Value("userEmail")
+	email, ok := emailVal.(string)
+
+	if !ok || email == "" {
+		h.respondWithError(w, http.StatusUnauthorized, "User context invalid")
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if err := h.validate.Struct(req); err != nil {
+		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "Validation failed",
+			"details": formatValidationErrors(err),
+		})
+		return
+	}
+
+	err := h.svc.UpdatePassword(r.Context(), email, req.OldPassword, req.NewPassword)
+	if err != nil {
+		h.respondWithError(w, http.StatusUnauthorized, "Failed to update password. Check old password.")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
 }
 
 // --- Helpers ---

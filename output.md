@@ -203,6 +203,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -238,7 +240,6 @@ func main() {
 	slog.Info("Starting application", "env", cfg.Env, "port", cfg.Port)
 
 	// 1. Open Database
-	// using the Safe Mode URL from config
 	db, err := sql.Open("sqlite", cfg.DBUrl)
 	if err != nil {
 		slog.Error("Failed to initialize db driver", "error", err)
@@ -247,7 +248,6 @@ func main() {
 	defer db.Close()
 
 	// 2. Verify Connection
-	// This triggers the actual file open and pragma application
 	if err := db.Ping(); err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
@@ -280,6 +280,7 @@ func main() {
 	analyticsService := service.NewAnalyticsManager(analyticsRepo)
 
 	// Handlers
+	authHandler := handler.NewAuthHandler(userService, cfg)
 	userHandler := handler.NewUserHandler(userService)
 	subjectHandler := handler.NewSubjectHandler(subjectService)
 	topicHandler := handler.NewTopicHandler(topicService)
@@ -298,6 +299,10 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	// Middleware Initialization (JWT)
+	jwtAuth := customMiddleware.NewJWTAuthMiddleware(cfg)
+
+	// Documentation Routes
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		doc := docs.SwaggerInfo.ReadDoc()
 		w.Header().Set("Content-Type", "application/json")
@@ -307,16 +312,26 @@ func main() {
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
-	// Middleware
-	basicAuth := customMiddleware.NewBasicAuthMiddleware(userService)
+	// --- Public Routes ---
+
+	// Authentication (Added this line to fix the error)
+	r.Post("/login", authHandler.Login)
 
 	r.Route("/users", func(r chi.Router) {
 		r.Post("/", userHandler.CreateUser)
 		r.Get("/{email}", userHandler.GetUser)
+
+		// Protected route
+		r.Group(func(r chi.Router) {
+			r.Use(jwtAuth.Protected)
+			r.Put("/password", userHandler.ChangePassword)
+		})
 	})
 
+	// --- Protected Routes (Require Valid JWT) ---
+
 	r.Route("/subjects", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", subjectHandler.CreateSubject)
 		r.Get("/", subjectHandler.ListSubjects)
 		r.Get("/{id}", subjectHandler.GetSubject)
@@ -327,17 +342,17 @@ func main() {
 	})
 
 	r.Route("/topics", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Get("/{id}", topicHandler.GetTopic)
 		r.Put("/{id}", topicHandler.UpdateTopic)
 		r.Delete("/{id}", topicHandler.DeleteTopic)
 	})
 
 	r.Route("/study-cycles", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", studyCycleHandler.CreateStudyCycle)
 		r.Get("/active", studyCycleHandler.GetActiveStudyCycle)
-		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems) // Round-robin
+		r.Get("/active/items", studyCycleHandler.GetActiveCycleWithItems)
 		r.Get("/{id}", studyCycleHandler.GetStudyCycle)
 		r.Put("/{id}", studyCycleHandler.UpdateStudyCycle)
 		r.Delete("/{id}", studyCycleHandler.DeleteStudyCycle)
@@ -346,23 +361,23 @@ func main() {
 	})
 
 	r.Route("/cycle-items", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Get("/{id}", cycleItemHandler.GetCycleItem)
 		r.Put("/{id}", cycleItemHandler.UpdateCycleItem)
 		r.Delete("/{id}", cycleItemHandler.DeleteCycleItem)
 	})
 
 	r.Route("/study-sessions", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", studySessionHandler.CreateStudySession)
-		r.Get("/open", studySessionHandler.GetOpenSession) // Crash recovery
+		r.Get("/open", studySessionHandler.GetOpenSession)
 		r.Get("/{id}", studySessionHandler.GetStudySession)
 		r.Put("/{id}", studySessionHandler.UpdateSessionDuration)
 		r.Delete("/{id}", studySessionHandler.DeleteStudySession)
 	})
 
 	r.Route("/session-pauses", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", sessionPauseHandler.CreateSessionPause)
 		r.Get("/{id}", sessionPauseHandler.GetSessionPause)
 		r.Put("/{id}/end", sessionPauseHandler.EndSessionPause)
@@ -370,7 +385,7 @@ func main() {
 	})
 
 	r.Route("/exercise-logs", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
+		r.Use(jwtAuth.Protected)
 		r.Post("/", exerciseLogHandler.CreateExerciseLog)
 		r.Get("/{id}", exerciseLogHandler.GetExerciseLog)
 		r.Delete("/{id}", exerciseLogHandler.DeleteExerciseLog)
@@ -378,12 +393,17 @@ func main() {
 
 	// Analytics routes
 	r.Route("/analytics", func(r chi.Router) {
-		r.Use(basicAuth.BasicAuth)
-		r.Get("/time-by-subject", analyticsHandler.GetTimeReportBySubject)
-		r.Get("/accuracy-by-subject", analyticsHandler.GetAccuracyBySubject)
-		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetAccuracyByTopic)
-		r.Get("/heatmap", analyticsHandler.GetActivityHeatmap)
+		r.Use(jwtAuth.Protected)
+		r.Get("/time-by-subject", analyticsHandler.GetTimeReport)
+		r.Get("/accuracy-by-subject", analyticsHandler.GetGlobalAccuracy)
+		r.Get("/accuracy-by-topic/{subject_id}", analyticsHandler.GetWeakPoints)
+		r.Get("/heatmap", analyticsHandler.GetHeatmap)
 	})
+
+	// Serve Static Web Files
+	workDir, _ := os.Getwd()
+	filesDir := http.Dir(filepath.Join(workDir, "assets"))
+	FileServer(r, "/", filesDir)
 
 	// 5. Server
 	srv := &http.Server{
@@ -414,6 +434,26 @@ func main() {
 	}
 
 	slog.Info("Server exited properly")
+}
+
+// FileServer convenience helper to serve static files
+func FileServer(r chi.Router, path string, root http.FileSystem) {
+	if strings.ContainsAny(path, "{}*") {
+		panic("FileServer does not permit any URL parameters.")
+	}
+
+	if path != "/" && path[len(path)-1] != '/' {
+		r.Get(path, http.RedirectHandler(path+"/", http.StatusMovedPermanently).ServeHTTP)
+		path += "/"
+	}
+	path += "*"
+
+	r.Get(path, func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.RouteContext(r.Context())
+		pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
+		fs := http.StripPrefix(pathPrefix, http.FileServer(root))
+		fs.ServeHTTP(w, r)
+	})
 }
 
 ```
@@ -494,7 +534,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/analytics/accuracy-by-subject": {
+        "/analytics/accuracy": {
             "get": {
                 "produces": [
                     "application/json"
@@ -502,7 +542,7 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get accuracy report by subject",
+                "summary": "Get global accuracy by subject",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -510,37 +550,6 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.AccuracyReportResponse"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/analytics/accuracy-by-topic/{subject_id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "analytics"
-                ],
-                "summary": "Get accuracy report by topic for a subject",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subject ID",
-                        "name": "subject_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -555,12 +564,11 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get activity heatmap data",
+                "summary": "Get study activity heatmap",
                 "parameters": [
                     {
                         "type": "integer",
-                        "default": 30,
-                        "description": "Number of days",
+                        "description": "Number of days (default 30)",
                         "name": "days",
                         "in": "query"
                     }
@@ -578,7 +586,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/analytics/time-by-subject": {
+        "/analytics/time-report": {
             "get": {
                 "produces": [
                     "application/json"
@@ -586,18 +594,18 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get time tracking report by subject",
+                "summary": "Get net study time report by subject",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Start date (YYYY-MM-DD)",
-                        "name": "start_date",
+                        "description": "Start Date From (YYYY-MM-DD)",
+                        "name": "start_date_from",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "End date (YYYY-MM-DD)",
-                        "name": "end_date",
+                        "description": "Start Date To (YYYY-MM-DD)",
+                        "name": "start_date_to",
                         "in": "query"
                     }
                 ],
@@ -608,6 +616,37 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/weak-points/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get weak points (accuracy by topic) for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -1565,7 +1604,6 @@ const docTemplate = `{
         },
         "/users": {
             "post": {
-                "description": "Create a user with email and name",
                 "consumes": [
                     "application/json"
                 ],
@@ -1593,17 +1631,38 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "400": {
-                        "description": "Invalid request",
+                    }
+                }
+            }
+        },
+        "/users/password": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Change user password",
+                "parameters": [
+                    {
+                        "description": "Password info",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.ChangePasswordRequest"
                         }
-                    },
-                    "500": {
-                        "description": "Internal server error",
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.MessageResponse"
                         }
                     }
                 }
@@ -1630,12 +1689,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "type": "string"
-                        }
                     }
                 }
             }
@@ -1655,6 +1708,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "password_hash": {
                     "type": "string"
                 }
             }
@@ -1679,6 +1735,22 @@ const docTemplate = `{
                 },
                 "total_questions": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "old_password": {
+                    "type": "string"
                 }
             }
         },
@@ -1811,17 +1883,20 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "email",
-                "name"
+                "name",
+                "password"
             ],
             "properties": {
                 "email": {
-                    "description": "required: cannot be empty\nemail: must be a valid email format",
                     "type": "string"
                 },
                 "name": {
-                    "description": "min=2: must be at least 2 chars",
                     "type": "string",
                     "minLength": 2
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
                 }
             }
         },
@@ -1922,6 +1997,14 @@ const docTemplate = `{
                 },
                 "total_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -2227,7 +2310,7 @@ func init() {
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
-        "/analytics/accuracy-by-subject": {
+        "/analytics/accuracy": {
             "get": {
                 "produces": [
                     "application/json"
@@ -2235,7 +2318,7 @@ func init() {
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get accuracy report by subject",
+                "summary": "Get global accuracy by subject",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2243,37 +2326,6 @@ func init() {
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.AccuracyReportResponse"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/analytics/accuracy-by-topic/{subject_id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "analytics"
-                ],
-                "summary": "Get accuracy report by topic for a subject",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subject ID",
-                        "name": "subject_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -2288,12 +2340,11 @@ func init() {
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get activity heatmap data",
+                "summary": "Get study activity heatmap",
                 "parameters": [
                     {
                         "type": "integer",
-                        "default": 30,
-                        "description": "Number of days",
+                        "description": "Number of days (default 30)",
                         "name": "days",
                         "in": "query"
                     }
@@ -2311,7 +2362,7 @@ func init() {
                 }
             }
         },
-        "/analytics/time-by-subject": {
+        "/analytics/time-report": {
             "get": {
                 "produces": [
                     "application/json"
@@ -2319,18 +2370,18 @@ func init() {
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get time tracking report by subject",
+                "summary": "Get net study time report by subject",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Start date (YYYY-MM-DD)",
-                        "name": "start_date",
+                        "description": "Start Date From (YYYY-MM-DD)",
+                        "name": "start_date_from",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "End date (YYYY-MM-DD)",
-                        "name": "end_date",
+                        "description": "Start Date To (YYYY-MM-DD)",
+                        "name": "start_date_to",
                         "in": "query"
                     }
                 ],
@@ -2341,6 +2392,37 @@ func init() {
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/weak-points/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get weak points (accuracy by topic) for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -3298,7 +3380,6 @@ func init() {
         },
         "/users": {
             "post": {
-                "description": "Create a user with email and name",
                 "consumes": [
                     "application/json"
                 ],
@@ -3326,17 +3407,38 @@ func init() {
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "400": {
-                        "description": "Invalid request",
+                    }
+                }
+            }
+        },
+        "/users/password": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Change user password",
+                "parameters": [
+                    {
+                        "description": "Password info",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.ChangePasswordRequest"
                         }
-                    },
-                    "500": {
-                        "description": "Internal server error",
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.MessageResponse"
                         }
                     }
                 }
@@ -3363,12 +3465,6 @@ func init() {
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "type": "string"
-                        }
                     }
                 }
             }
@@ -3388,6 +3484,9 @@ func init() {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "password_hash": {
                     "type": "string"
                 }
             }
@@ -3412,6 +3511,22 @@ func init() {
                 },
                 "total_questions": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "old_password": {
+                    "type": "string"
                 }
             }
         },
@@ -3544,17 +3659,20 @@ func init() {
             "type": "object",
             "required": [
                 "email",
-                "name"
+                "name",
+                "password"
             ],
             "properties": {
                 "email": {
-                    "description": "required: cannot be empty\nemail: must be a valid email format",
                     "type": "string"
                 },
                 "name": {
-                    "description": "min=2: must be at least 2 chars",
                     "type": "string",
                     "minLength": 2
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
                 }
             }
         },
@@ -3655,6 +3773,14 @@ func init() {
                 },
                 "total_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -3942,6 +4068,8 @@ definitions:
         type: string
       name:
         type: string
+      password_hash:
+        type: string
     type: object
   handler.AccuracyReportResponse:
     properties:
@@ -3957,6 +4085,17 @@ definitions:
         type: integer
       total_questions:
         type: integer
+    type: object
+  handler.ChangePasswordRequest:
+    properties:
+      new_password:
+        minLength: 6
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
     type: object
   handler.CreateCycleItemRequest:
     properties:
@@ -4046,17 +4185,17 @@ definitions:
   handler.CreateUserRequest:
     properties:
       email:
-        description: |-
-          required: cannot be empty
-          email: must be a valid email format
         type: string
       name:
-        description: 'min=2: must be at least 2 chars'
         minLength: 2
+        type: string
+      password:
+        minLength: 6
         type: string
     required:
     - email
     - name
+    - password
     type: object
   handler.CycleItemResponse:
     properties:
@@ -4122,6 +4261,11 @@ definitions:
         type: string
       total_seconds:
         type: integer
+    type: object
+  handler.MessageResponse:
+    properties:
+      message:
+        type: string
     type: object
   handler.OpenSessionResponse:
     properties:
@@ -4303,7 +4447,7 @@ info:
   title: My Go API
   version: "1.0"
 paths:
-  /analytics/accuracy-by-subject:
+  /analytics/accuracy:
     get:
       produces:
       - application/json
@@ -4314,10 +4458,52 @@ paths:
             items:
               $ref: '#/definitions/handler.AccuracyReportResponse'
             type: array
-      summary: Get accuracy report by subject
+      summary: Get global accuracy by subject
       tags:
       - analytics
-  /analytics/accuracy-by-topic/{subject_id}:
+  /analytics/heatmap:
+    get:
+      parameters:
+      - description: Number of days (default 30)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.HeatmapDayResponse'
+            type: array
+      summary: Get study activity heatmap
+      tags:
+      - analytics
+  /analytics/time-report:
+    get:
+      parameters:
+      - description: Start Date From (YYYY-MM-DD)
+        in: query
+        name: start_date_from
+        type: string
+      - description: Start Date To (YYYY-MM-DD)
+        in: query
+        name: start_date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.TimeReportResponse'
+            type: array
+      summary: Get net study time report by subject
+      tags:
+      - analytics
+  /analytics/weak-points/{subject_id}:
     get:
       parameters:
       - description: Subject ID
@@ -4334,50 +4520,7 @@ paths:
             items:
               $ref: '#/definitions/handler.TopicAccuracyResponse'
             type: array
-      summary: Get accuracy report by topic for a subject
-      tags:
-      - analytics
-  /analytics/heatmap:
-    get:
-      parameters:
-      - default: 30
-        description: Number of days
-        in: query
-        name: days
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/handler.HeatmapDayResponse'
-            type: array
-      summary: Get activity heatmap data
-      tags:
-      - analytics
-  /analytics/time-by-subject:
-    get:
-      parameters:
-      - description: Start date (YYYY-MM-DD)
-        in: query
-        name: start_date
-        type: string
-      - description: End date (YYYY-MM-DD)
-        in: query
-        name: end_date
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/handler.TimeReportResponse'
-            type: array
-      summary: Get time tracking report by subject
+      summary: Get weak points (accuracy by topic) for a subject
       tags:
       - analytics
   /cycle-items/{id}:
@@ -4998,7 +5141,6 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a user with email and name
       parameters:
       - description: User info
         in: body
@@ -5013,14 +5155,6 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/database.User'
-        "400":
-          description: Invalid request
-          schema:
-            type: string
-        "500":
-          description: Internal server error
-          schema:
-            type: string
       summary: Create a new user
       tags:
       - users
@@ -5037,11 +5171,28 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/database.User'
-        "404":
-          description: User not found
-          schema:
-            type: string
       summary: Get user by Email
+      tags:
+      - users
+  /users/password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Password info
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.MessageResponse'
+      summary: Change user password
       tags:
       - users
 swagger: "2.0"
@@ -5065,22 +5216,26 @@ import (
 )
 
 type Config struct {
-	Port    string
-	DBUrl   string
-	Env     string
-	Timeout time.Duration
+	Port      string
+	DBUrl     string
+	Env       string
+	JWTSecret string
+	Timeout   time.Duration
 }
 
 func Load() (*Config, error) {
+	// Load .env file if it exists, ignore error if it doesn't
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:    getEnv("PORT", "8080"),
-		DBUrl:   getEnv("DB_URL", ""),
-		Env:     getEnv("ENV", "development"),
-		Timeout: 5 * time.Second,
+		Port:      getEnv("PORT", "8080"),
+		DBUrl:     getEnv("DB_URL", ""),
+		Env:       getEnv("ENV", "development"),
+		JWTSecret: getEnv("JWT_SECRET", "super-secret-key-change-me"),
+		Timeout:   5 * time.Second,
 	}
 
+	// Database Connection Logic
 	if cfg.DBUrl == "" {
 		if cfg.Env == "development" {
 			// 1. Get Absolute Path
@@ -5097,8 +5252,13 @@ func Load() (*Config, error) {
 			// _pragma=mmap_size(0): No memory mapping (fixes "Out of Memory" on some drives)
 			cfg.DBUrl = fmt.Sprintf("file:%s?_pragma=journal_mode(DELETE)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(0)", cleanPath)
 		} else {
-			return nil, fmt.Errorf("DB_URL environment variable is required")
+			return nil, fmt.Errorf("DB_URL environment variable is required in production")
 		}
+	}
+
+	// Security Check for Production
+	if cfg.Env == "production" && cfg.JWTSecret == "super-secret-key-change-me" {
+		return nil, fmt.Errorf("JWT_SECRET environment variable is required in production")
 	}
 
 	return cfg, nil
@@ -5654,6 +5814,13 @@ type ExerciseLog struct {
 	CreatedAt      string         `json:"created_at"`
 }
 
+type PasswordResetToken struct {
+	TokenHash string       `json:"token_hash"`
+	UserID    string       `json:"user_id"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	Used      sql.NullBool `json:"used"`
+}
+
 type SessionPause struct {
 	ID              string         `json:"id"`
 	SessionID       string         `json:"session_id"`
@@ -5692,6 +5859,7 @@ type Subject struct {
 	CreatedAt string         `json:"created_at"`
 	UpdatedAt string         `json:"updated_at"`
 	DeletedAt sql.NullString `json:"deleted_at"`
+	UserID    string         `json:"user_id"`
 }
 
 type Topic struct {
@@ -5742,7 +5910,7 @@ type Querier interface {
 	DeleteSessionPause(ctx context.Context, id string) error
 	DeleteStudyCycle(ctx context.Context, id string) error
 	DeleteStudySession(ctx context.Context, id string) error
-	DeleteSubject(ctx context.Context, id string) error
+	DeleteSubject(ctx context.Context, arg DeleteSubjectParams) error
 	DeleteTopic(ctx context.Context, id string) error
 	EndSessionPause(ctx context.Context, arg EndSessionPauseParams) error
 	GetAccuracyBySubject(ctx context.Context) ([]GetAccuracyBySubjectRow, error)
@@ -5756,19 +5924,20 @@ type Querier interface {
 	GetSessionPause(ctx context.Context, id string) (SessionPause, error)
 	GetStudyCycle(ctx context.Context, id string) (StudyCycle, error)
 	GetStudySession(ctx context.Context, id string) (StudySession, error)
-	GetSubject(ctx context.Context, id string) (Subject, error)
+	GetSubject(ctx context.Context, arg GetSubjectParams) (Subject, error)
 	// Analytics Queries for Study App
 	GetTimeReportBySubject(ctx context.Context, arg GetTimeReportBySubjectParams) ([]GetTimeReportBySubjectRow, error)
 	GetTopic(ctx context.Context, id string) (Topic, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	ListCycleItems(ctx context.Context, cycleID string) ([]CycleItem, error)
-	ListSubjects(ctx context.Context) ([]Subject, error)
+	ListSubjects(ctx context.Context, userID string) ([]Subject, error)
 	ListTopicsBySubject(ctx context.Context, subjectID string) ([]Topic, error)
 	UpdateCycleItem(ctx context.Context, arg UpdateCycleItemParams) error
 	UpdateSessionDuration(ctx context.Context, arg UpdateSessionDurationParams) error
 	UpdateStudyCycle(ctx context.Context, arg UpdateStudyCycleParams) error
 	UpdateSubject(ctx context.Context, arg UpdateSubjectParams) error
 	UpdateTopic(ctx context.Context, arg UpdateTopicParams) error
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 }
 
 var _ Querier = (*Queries)(nil)
@@ -6214,19 +6383,25 @@ import (
 )
 
 const createSubject = `-- name: CreateSubject :one
-INSERT INTO subjects (id, name, color_hex)
-VALUES (?, ?, ?)
-RETURNING id, name, color_hex, created_at, updated_at, deleted_at
+INSERT INTO subjects (id, user_id, name, color_hex)
+VALUES (?, ?, ?, ?)
+RETURNING id, name, color_hex, created_at, updated_at, deleted_at, user_id
 `
 
 type CreateSubjectParams struct {
 	ID       string         `json:"id"`
+	UserID   string         `json:"user_id"`
 	Name     string         `json:"name"`
 	ColorHex sql.NullString `json:"color_hex"`
 }
 
 func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error) {
-	row := q.db.QueryRowContext(ctx, createSubject, arg.ID, arg.Name, arg.ColorHex)
+	row := q.db.QueryRowContext(ctx, createSubject,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.ColorHex,
+	)
 	var i Subject
 	err := row.Scan(
 		&i.ID,
@@ -6235,6 +6410,7 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -6242,21 +6418,31 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 const deleteSubject = `-- name: DeleteSubject :exec
 UPDATE subjects
 SET deleted_at = datetime('now')
-WHERE id = ?
+WHERE id = ? AND user_id = ?
 `
 
-func (q *Queries) DeleteSubject(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteSubject, id)
+type DeleteSubjectParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) DeleteSubject(ctx context.Context, arg DeleteSubjectParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSubject, arg.ID, arg.UserID)
 	return err
 }
 
 const getSubject = `-- name: GetSubject :one
-SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
-WHERE id = ? AND deleted_at IS NULL
+SELECT id, name, color_hex, created_at, updated_at, deleted_at, user_id FROM subjects
+WHERE id = ? AND user_id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
-	row := q.db.QueryRowContext(ctx, getSubject, id)
+type GetSubjectParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) GetSubject(ctx context.Context, arg GetSubjectParams) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, getSubject, arg.ID, arg.UserID)
 	var i Subject
 	err := row.Scan(
 		&i.ID,
@@ -6265,18 +6451,19 @@ func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listSubjects = `-- name: ListSubjects :many
-SELECT id, name, color_hex, created_at, updated_at, deleted_at FROM subjects
-WHERE deleted_at IS NULL
+SELECT id, name, color_hex, created_at, updated_at, deleted_at, user_id FROM subjects
+WHERE user_id = ? AND deleted_at IS NULL
 ORDER BY name
 `
 
-func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
-	rows, err := q.db.QueryContext(ctx, listSubjects)
+func (q *Queries) ListSubjects(ctx context.Context, userID string) ([]Subject, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjects, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -6291,6 +6478,7 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -6308,17 +6496,23 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 const updateSubject = `-- name: UpdateSubject :exec
 UPDATE subjects
 SET name = ?, color_hex = ?, updated_at = datetime('now')
-WHERE id = ? AND deleted_at IS NULL
+WHERE id = ? AND user_id = ? AND deleted_at IS NULL
 `
 
 type UpdateSubjectParams struct {
 	Name     string         `json:"name"`
 	ColorHex sql.NullString `json:"color_hex"`
 	ID       string         `json:"id"`
+	UserID   string         `json:"user_id"`
 }
 
 func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) error {
-	_, err := q.db.ExecContext(ctx, updateSubject, arg.Name, arg.ColorHex, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateSubject,
+		arg.Name,
+		arg.ColorHex,
+		arg.ID,
+		arg.UserID,
+	)
 	return err
 }
 
@@ -6515,6 +6709,22 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = ?
+WHERE id = ?
+`
+
+type UpdateUserPasswordParams struct {
+	PasswordHash string `json:"password_hash"`
+	ID           string `json:"id"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.ID)
+	return err
+}
+
 ```
 
 --- 
@@ -6547,7 +6757,7 @@ func NewAnalyticsHandler(svc service.AnalyticsService) *AnalyticsHandler {
 // @Produce json
 // @Param start_date_from query string false "Start Date From (YYYY-MM-DD)"
 // @Param start_date_to query string false "Start Date To (YYYY-MM-DD)"
-// @Success 200 {array} database.GetTimeReportBySubjectRow
+// @Success 200 {array} handler.TimeReportResponse
 // @Router /analytics/time-report [get]
 func (h *AnalyticsHandler) GetTimeReport(w http.ResponseWriter, r *http.Request) {
 	startDateFrom := r.URL.Query().Get("start_date_from")
@@ -6559,14 +6769,26 @@ func (h *AnalyticsHandler) GetTimeReport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response (DTO)
+	response := make([]TimeReportResponse, len(report))
+	for i, row := range report {
+		response[i] = TimeReportResponse{
+			SubjectID:     row.SubjectID,
+			SubjectName:   row.SubjectName,
+			ColorHex:      row.ColorHex.String, // Extract string from sql.NullString
+			SessionsCount: int(row.SessionsCount),
+			TotalHoursNet: row.TotalHoursNet,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetGlobalAccuracy godoc
 // @Summary Get global accuracy by subject
 // @Tags analytics
 // @Produce json
-// @Success 200 {array} database.GetAccuracyBySubjectRow
+// @Success 200 {array} handler.AccuracyReportResponse
 // @Router /analytics/accuracy [get]
 func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Request) {
 	report, err := h.svc.GetGlobalAccuracy(r.Context())
@@ -6575,7 +6797,20 @@ func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response
+	response := make([]AccuracyReportResponse, len(report))
+	for i, row := range report {
+		response[i] = AccuracyReportResponse{
+			SubjectID:          row.SubjectID,
+			SubjectName:        row.SubjectName,
+			ColorHex:           row.ColorHex.String,
+			TotalQuestions:     int(row.TotalQuestions.Float64), // Handle sql.NullFloat64
+			TotalCorrect:       int(row.TotalCorrect.Float64),
+			AccuracyPercentage: row.AccuracyPercentage,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetWeakPoints godoc
@@ -6583,7 +6818,7 @@ func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Requ
 // @Tags analytics
 // @Produce json
 // @Param subject_id path string true "Subject ID"
-// @Success 200 {array} database.GetAccuracyByTopicRow
+// @Success 200 {array} handler.TopicAccuracyResponse
 // @Router /analytics/weak-points/{subject_id} [get]
 func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request) {
 	subjectID := chi.URLParam(r, "subject_id")
@@ -6598,7 +6833,19 @@ func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response
+	response := make([]TopicAccuracyResponse, len(report))
+	for i, row := range report {
+		response[i] = TopicAccuracyResponse{
+			TopicID:            row.TopicID,
+			TopicName:          row.TopicName,
+			TotalQuestions:     int(row.TotalQuestions.Float64),
+			TotalCorrect:       int(row.TotalCorrect.Float64),
+			AccuracyPercentage: row.AccuracyPercentage,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetHeatmap godoc
@@ -6606,7 +6853,7 @@ func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request)
 // @Tags analytics
 // @Produce json
 // @Param days query int false "Number of days (default 30)"
-// @Success 200 {array} database.GetActivityHeatmapRow
+// @Success 200 {array} handler.HeatmapDayResponse
 // @Router /analytics/heatmap [get]
 func (h *AnalyticsHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 	daysStr := r.URL.Query().Get("days")
@@ -6623,7 +6870,31 @@ func (h *AnalyticsHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, heatmap)
+	// Map DB Result to JSON Response
+	response := make([]HeatmapDayResponse, len(heatmap))
+	for i, row := range heatmap {
+		// Handle interface{} types returned by SQLite driver for calculated fields
+		dateStr, _ := row.StudyDate.(string)
+
+		var totalSec int
+		// TotalSeconds might come back as int64 or float64 depending on the driver/OS
+		switch v := row.TotalSeconds.(type) {
+		case int64:
+			totalSec = int(v)
+		case float64:
+			totalSec = int(v)
+		default:
+			totalSec = 0
+		}
+
+		response[i] = HeatmapDayResponse{
+			StudyDate:     dateStr,
+			SessionsCount: int(row.SessionsCount),
+			TotalSeconds:  totalSec,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 func (h *AnalyticsHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
@@ -6634,6 +6905,83 @@ func (h *AnalyticsHandler) respondWithJSON(w http.ResponseWriter, code int, payl
 
 func (h *AnalyticsHandler) respondWithError(w http.ResponseWriter, code int, message string) {
 	h.respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+```
+
+--- 
+
+**File:** `internal/handler/auth_handler.go`
+
+```typescript
+package handler
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/joaoapaenas/my-api/internal/config"
+	"github.com/joaoapaenas/my-api/internal/service"
+	"golang.org/x/crypto/bcrypt"
+)
+
+type AuthHandler struct {
+	userService service.UserService
+	cfg         *config.Config
+}
+
+func NewAuthHandler(userService service.UserService, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{userService: userService, cfg: cfg}
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+}
+
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Find User
+	user, err := h.userService.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		// Use generic message for security
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Check Password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// 3. Generate JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":   user.ID,
+		"email": user.Email, // Ensure this is here
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(h.cfg.JWTSecret))
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Return Token
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(LoginResponse{Token: tokenString})
 }
 
 ```
@@ -7689,6 +8037,13 @@ type UpdateSubjectRequest struct {
 // @Success 201 {object} handler.SubjectResponse
 // @Router /subjects [post]
 func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	var req CreateSubjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
@@ -7703,7 +8058,8 @@ func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subject, err := h.svc.CreateSubject(r.Context(), req.Name, req.ColorHex)
+	// 2. Pass userID to Service
+	subject, err := h.svc.CreateSubject(r.Context(), userID.(string), req.Name, req.ColorHex)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -7719,7 +8075,15 @@ func (h *SubjectHandler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} handler.SubjectResponse
 // @Router /subjects [get]
 func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
-	subjects, err := h.svc.ListSubjects(r.Context())
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	// 2. Pass userID to Service
+	subjects, err := h.svc.ListSubjects(r.Context(), userID.(string))
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -7736,14 +8100,23 @@ func (h *SubjectHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} handler.SubjectResponse
 // @Router /subjects/{id} [get]
 func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
 		return
 	}
 
-	subject, err := h.svc.GetSubject(r.Context(), id)
+	// 2. Pass userID to Service
+	subject, err := h.svc.GetSubject(r.Context(), id, userID.(string))
 	if err != nil {
+		// If DB returns nothing because userID didn't match, it looks like a generic "Not Found", which is correct security.
 		h.respondWithError(w, http.StatusNotFound, "Subject not found")
 		return
 	}
@@ -7761,6 +8134,13 @@ func (h *SubjectHandler) GetSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "OK"
 // @Router /subjects/{id} [put]
 func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
@@ -7781,7 +8161,8 @@ func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.UpdateSubject(r.Context(), id, req.Name, req.ColorHex)
+	// 2. Pass userID to Service
+	err := h.svc.UpdateSubject(r.Context(), id, userID.(string), req.Name, req.ColorHex)
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -7797,13 +8178,21 @@ func (h *SubjectHandler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
 // @Success 204
 // @Router /subjects/{id} [delete]
 func (h *SubjectHandler) DeleteSubject(w http.ResponseWriter, r *http.Request) {
+	// 1. Extract UserID
+	userID := r.Context().Value("userID")
+	if userID == nil {
+		h.respondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		h.respondWithError(w, http.StatusBadRequest, "Subject ID is required")
 		return
 	}
 
-	err := h.svc.DeleteSubject(r.Context(), id)
+	// 2. Pass userID to Service
+	err := h.svc.DeleteSubject(r.Context(), id, userID.(string))
 	if err != nil {
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -8043,31 +8432,30 @@ func NewUserHandler(svc service.UserService) *UserHandler {
 	return &UserHandler{svc: svc, validate: validator.New()}
 }
 
+// --- Structs ---
+
 type CreateUserRequest struct {
-	// required: cannot be empty
-	// email: must be a valid email format
-	Email string `json:"email" validate:"required,email"`
-
-	// min=2: must be at least 2 chars
-	Name string `json:"name" validate:"required,min=2"`
-
-	// min=6: must be at least 6 chars
+	Email    string `json:"email" validate:"required,email"`
+	Name     string `json:"name" validate:"required,min=2"`
 	Password string `json:"password" validate:"required,min=6"`
 }
 
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=6"`
+}
+
+// --- Handlers ---
+
 // CreateUser godoc
 // @Summary Create a new user
-// @Description Create a user with email and name
 // @Tags users
 // @Accept json
 // @Produce json
 // @Param input body CreateUserRequest true "User info"
 // @Success 201 {object} database.User
-// @Failure 400 {string} string "Invalid request"
-// @Failure 500 {string} string "Internal server error"
 // @Router /users [post]
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// 1. Decode & Basic Validation
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
@@ -8075,25 +8463,19 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.validate.Struct(req); err != nil {
-		// Return friendly validation errors
-		validationErrors := formatValidationErrors(err)
 		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"error":   "Validation failed",
-			"details": validationErrors,
+			"details": formatValidationErrors(err),
 		})
 		return
 	}
 
-	// 2. Call Service (Business Logic)
-	// Notice: We don't generate UUIDs here anymore.
 	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
-		// Check for specific domain errors if you defined them
 		if errors.Is(err, service.ErrEmailTaken) {
 			h.respondWithError(w, http.StatusConflict, "Email already exists")
 			return
 		}
-
 		slog.Error("Failed to create user", "error", err)
 		h.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -8107,14 +8489,12 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 // @Tags users
 // @Param email path string true "User Email"
 // @Success 200 {object} database.User
-// @Failure 404 {string} string "User not found"
 // @Router /users/{email} [get]
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	email := chi.URLParam(r, "email")
 
 	user, err := h.svc.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		// Handle "Not Found" specifically
 		if err == sql.ErrNoRows || errors.Is(err, service.ErrUserNotFound) {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
@@ -8124,6 +8504,48 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(user)
+}
+
+// ChangePassword godoc
+// @Summary Change user password
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param input body ChangePasswordRequest true "Password info"
+// @Success 200 {object} handler.MessageResponse
+// @Router /users/password [put]
+func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	// Extract email from context (set by JWT middleware)
+	// We cast to string safely
+	emailVal := r.Context().Value("userEmail")
+	email, ok := emailVal.(string)
+
+	if !ok || email == "" {
+		h.respondWithError(w, http.StatusUnauthorized, "User context invalid")
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if err := h.validate.Struct(req); err != nil {
+		h.respondWithJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "Validation failed",
+			"details": formatValidationErrors(err),
+		})
+		return
+	}
+
+	err := h.svc.UpdatePassword(r.Context(), email, req.OldPassword, req.NewPassword)
+	if err != nil {
+		h.respondWithError(w, http.StatusUnauthorized, "Failed to update password. Check old password.")
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
 }
 
 // --- Helpers ---
@@ -8175,6 +8597,11 @@ func (m *MockUserService) CreateUser(ctx context.Context, email, name, password 
 func (m *MockUserService) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
 	args := m.Called(ctx, email)
 	return args.Get(0).(database.User), args.Error(1)
+}
+
+func (m *MockUserService) UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error {
+	args := m.Called(ctx, email, oldPassword, newPassword)
+	return args.Error(0)
 }
 
 func TestUserHandler_CreateUser(t *testing.T) {
@@ -8330,6 +8757,71 @@ func (m *BasicAuthMiddleware) BasicAuth(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+```
+
+--- 
+
+**File:** `internal/middleware/jwt_auth.go`
+
+```typescript
+package middleware
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/joaoapaenas/my-api/internal/config"
+)
+
+type JWTAuthMiddleware struct {
+	cfg *config.Config
+}
+
+func NewJWTAuthMiddleware(cfg *config.Config) *JWTAuthMiddleware {
+	return &JWTAuthMiddleware{cfg: cfg}
+}
+
+func (m *JWTAuthMiddleware) Protected(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Missing Authorization Header", http.StatusUnauthorized)
+			return
+		}
+
+		// Header format: "Bearer <token>"
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "Invalid Authorization Header Format", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := parts[1]
+
+		// Parse and Validate
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(m.cfg.JWTSecret), nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid or Expired Token", http.StatusUnauthorized)
+			return
+		}
+
+		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+			ctx := context.WithValue(r.Context(), "userID", claims["sub"])
+			ctx = context.WithValue(ctx, "userEmail", claims["email"]) // ADD THIS
+			next.ServeHTTP(w, r.WithContext(ctx))
+		}
 	})
 }
 
@@ -8685,11 +9177,20 @@ import (
 )
 
 type SubjectRepository interface {
+	// Create now expects the UserID inside arg
 	CreateSubject(ctx context.Context, arg database.CreateSubjectParams) (database.Subject, error)
-	ListSubjects(ctx context.Context) ([]database.Subject, error)
-	GetSubject(ctx context.Context, id string) (database.Subject, error)
+
+	// List is now filtered by userID
+	ListSubjects(ctx context.Context, userID string) ([]database.Subject, error)
+
+	// Get is now filtered by userID (prevent accessing others' IDs)
+	GetSubject(ctx context.Context, id, userID string) (database.Subject, error)
+
+	// Update expects UserID inside arg to ensure ownership before update
 	UpdateSubject(ctx context.Context, arg database.UpdateSubjectParams) error
-	DeleteSubject(ctx context.Context, id string) error
+
+	// Delete requires userID to ensure ownership
+	DeleteSubject(ctx context.Context, id, userID string) error
 }
 
 type SQLSubjectRepository struct {
@@ -8704,20 +9205,20 @@ func (r *SQLSubjectRepository) CreateSubject(ctx context.Context, arg database.C
 	return r.q.CreateSubject(ctx, arg)
 }
 
-func (r *SQLSubjectRepository) ListSubjects(ctx context.Context) ([]database.Subject, error) {
-	return r.q.ListSubjects(ctx)
+func (r *SQLSubjectRepository) ListSubjects(ctx context.Context, userID string) ([]database.Subject, error) {
+	return r.q.ListSubjects(ctx, userID)
 }
 
-func (r *SQLSubjectRepository) GetSubject(ctx context.Context, id string) (database.Subject, error) {
-	return r.q.GetSubject(ctx, id)
+func (r *SQLSubjectRepository) GetSubject(ctx context.Context, id, userID string) (database.Subject, error) {
+	return r.q.GetSubject(ctx, id, userID)
 }
 
 func (r *SQLSubjectRepository) UpdateSubject(ctx context.Context, arg database.UpdateSubjectParams) error {
 	return r.q.UpdateSubject(ctx, arg)
 }
 
-func (r *SQLSubjectRepository) DeleteSubject(ctx context.Context, id string) error {
-	return r.q.DeleteSubject(ctx, id)
+func (r *SQLSubjectRepository) DeleteSubject(ctx context.Context, id, userID string) error {
+	return r.q.DeleteSubject(ctx, id, userID)
 }
 
 ```
@@ -8789,6 +9290,7 @@ import (
 type UserRepository interface {
 	CreateUser(ctx context.Context, arg database.CreateUserParams) (database.User, error)
 	GetUserByEmail(ctx context.Context, email string) (database.User, error)
+	UpdateUserPassword(ctx context.Context, id, passwordHash string) error
 }
 
 type SQLUserRepository struct {
@@ -8805,6 +9307,13 @@ func (r *SQLUserRepository) CreateUser(ctx context.Context, arg database.CreateU
 
 func (r *SQLUserRepository) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
 	return r.q.GetUserByEmail(ctx, email)
+}
+
+func (r *SQLUserRepository) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	return r.q.UpdateUserPassword(ctx, database.UpdateUserPasswordParams{
+		ID:           id,
+		PasswordHash: passwordHash,
+	})
 }
 
 ```
@@ -9563,11 +10072,11 @@ import (
 )
 
 type SubjectService interface {
-	CreateSubject(ctx context.Context, name, colorHex string) (database.Subject, error)
-	ListSubjects(ctx context.Context) ([]database.Subject, error)
-	GetSubject(ctx context.Context, id string) (database.Subject, error)
-	UpdateSubject(ctx context.Context, id, name, colorHex string) error
-	DeleteSubject(ctx context.Context, id string) error
+	CreateSubject(ctx context.Context, userID, name, colorHex string) (database.Subject, error)
+	ListSubjects(ctx context.Context, userID string) ([]database.Subject, error)
+	GetSubject(ctx context.Context, id, userID string) (database.Subject, error)
+	UpdateSubject(ctx context.Context, id, userID, name, colorHex string) error
+	DeleteSubject(ctx context.Context, id, userID string) error
 }
 
 type SubjectManager struct {
@@ -9578,7 +10087,7 @@ func NewSubjectManager(repo repository.SubjectRepository) *SubjectManager {
 	return &SubjectManager{repo: repo}
 }
 
-func (s *SubjectManager) CreateSubject(ctx context.Context, name, colorHex string) (database.Subject, error) {
+func (s *SubjectManager) CreateSubject(ctx context.Context, userID, name, colorHex string) (database.Subject, error) {
 	id := uuid.New().String()
 
 	var color sql.NullString
@@ -9586,36 +10095,48 @@ func (s *SubjectManager) CreateSubject(ctx context.Context, name, colorHex strin
 		color = sql.NullString{String: colorHex, Valid: true}
 	}
 
+	// We now pass userID into the Params
 	return s.repo.CreateSubject(ctx, database.CreateSubjectParams{
 		ID:       id,
+		UserID:   userID,
 		Name:     name,
 		ColorHex: color,
 	})
 }
 
-func (s *SubjectManager) ListSubjects(ctx context.Context) ([]database.Subject, error) {
-	return s.repo.ListSubjects(ctx)
+func (s *SubjectManager) ListSubjects(ctx context.Context, userID string) ([]database.Subject, error) {
+	subjects, err := s.repo.ListSubjects(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// Defensive fix for JSON null vs []
+	if subjects == nil {
+		return []database.Subject{}, nil
+	}
+	return subjects, nil
 }
 
-func (s *SubjectManager) GetSubject(ctx context.Context, id string) (database.Subject, error) {
-	return s.repo.GetSubject(ctx, id)
+func (s *SubjectManager) GetSubject(ctx context.Context, id, userID string) (database.Subject, error) {
+	return s.repo.GetSubject(ctx, id, userID)
 }
 
-func (s *SubjectManager) UpdateSubject(ctx context.Context, id, name, colorHex string) error {
+func (s *SubjectManager) UpdateSubject(ctx context.Context, id, userID, name, colorHex string) error {
 	var color sql.NullString
 	if colorHex != "" {
 		color = sql.NullString{String: colorHex, Valid: true}
 	}
 
+	// We now pass userID into the Params to ensure the WHERE clause checks ownership
 	return s.repo.UpdateSubject(ctx, database.UpdateSubjectParams{
 		Name:     name,
 		ColorHex: color,
 		ID:       id,
+		UserID:   userID,
 	})
 }
 
-func (s *SubjectManager) DeleteSubject(ctx context.Context, id string) error {
-	return s.repo.DeleteSubject(ctx, id)
+func (s *SubjectManager) DeleteSubject(ctx context.Context, id, userID string) error {
+	return s.repo.DeleteSubject(ctx, id, userID)
 }
 
 ```
@@ -9890,6 +10411,7 @@ var (
 type UserService interface {
 	CreateUser(ctx context.Context, email, name, password string) (database.User, error)
 	GetUserByEmail(ctx context.Context, email string) (database.User, error)
+	UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error
 }
 
 // UserManager implements UserService
@@ -9917,8 +10439,7 @@ func (s *UserManager) CreateUser(ctx context.Context, email, name, password stri
 		PasswordHash: string(hashedPassword),
 	})
 	if err != nil {
-		// In a real app, check for specific DB errors (like unique constraint violation)
-		// and return ErrEmailTaken. For now, we return the raw error.
+		// In a real app, check for specific DB errors
 		return database.User{}, err
 	}
 	return user, nil
@@ -9927,11 +10448,31 @@ func (s *UserManager) CreateUser(ctx context.Context, email, name, password stri
 func (s *UserManager) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
-		// Assuming standard sql.ErrNoRows check happens here or in repo
-		// Ideally, you map sql.ErrNoRows -> ErrUserNotFound here
 		return database.User{}, err
 	}
 	return user, nil
+}
+
+func (s *UserManager) UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error {
+	// 1. Get User
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+
+	// 2. Verify Old Password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return errors.New("invalid old password")
+	}
+
+	// 3. Hash New Password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	// 4. Update in DB
+	return s.repo.UpdateUserPassword(ctx, user.ID, string(newHash))
 }
 
 ```
@@ -9967,6 +10508,11 @@ func (m *MockUserRepository) CreateUser(ctx context.Context, arg database.Create
 func (m *MockUserRepository) GetUserByEmail(ctx context.Context, email string) (database.User, error) {
 	args := m.Called(ctx, email)
 	return args.Get(0).(database.User), args.Error(1)
+}
+
+func (m *MockUserRepository) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	args := m.Called(ctx, id, passwordHash)
+	return args.Error(0)
 }
 
 func TestUserManager_CreateUser(t *testing.T) {

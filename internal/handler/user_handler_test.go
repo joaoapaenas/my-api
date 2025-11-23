@@ -30,6 +30,11 @@ func (m *MockUserService) GetUserByEmail(ctx context.Context, email string) (dat
 	return args.Get(0).(database.User), args.Error(1)
 }
 
+func (m *MockUserService) UpdatePassword(ctx context.Context, email, oldPassword, newPassword string) error {
+	args := m.Called(ctx, email, oldPassword, newPassword)
+	return args.Error(0)
+}
+
 func TestUserHandler_CreateUser(t *testing.T) {
 	mockSvc := new(MockUserService)
 	h := handler.NewUserHandler(mockSvc)

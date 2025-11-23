@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/analytics/accuracy-by-subject": {
+        "/analytics/accuracy": {
             "get": {
                 "produces": [
                     "application/json"
@@ -23,7 +23,7 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get accuracy report by subject",
+                "summary": "Get global accuracy by subject",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -31,37 +31,6 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.AccuracyReportResponse"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/analytics/accuracy-by-topic/{subject_id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "analytics"
-                ],
-                "summary": "Get accuracy report by topic for a subject",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subject ID",
-                        "name": "subject_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -76,12 +45,11 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get activity heatmap data",
+                "summary": "Get study activity heatmap",
                 "parameters": [
                     {
                         "type": "integer",
-                        "default": 30,
-                        "description": "Number of days",
+                        "description": "Number of days (default 30)",
                         "name": "days",
                         "in": "query"
                     }
@@ -99,7 +67,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/analytics/time-by-subject": {
+        "/analytics/time-report": {
             "get": {
                 "produces": [
                     "application/json"
@@ -107,18 +75,18 @@ const docTemplate = `{
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get time tracking report by subject",
+                "summary": "Get net study time report by subject",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Start date (YYYY-MM-DD)",
-                        "name": "start_date",
+                        "description": "Start Date From (YYYY-MM-DD)",
+                        "name": "start_date_from",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "End date (YYYY-MM-DD)",
-                        "name": "end_date",
+                        "description": "Start Date To (YYYY-MM-DD)",
+                        "name": "start_date_to",
                         "in": "query"
                     }
                 ],
@@ -129,6 +97,37 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/handler.TimeReportResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/analytics/weak-points/{subject_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get weak points (accuracy by topic) for a subject",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Subject ID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handler.TopicAccuracyResponse"
                             }
                         }
                     }
@@ -1086,7 +1085,6 @@ const docTemplate = `{
         },
         "/users": {
             "post": {
-                "description": "Create a user with email and name",
                 "consumes": [
                     "application/json"
                 ],
@@ -1114,17 +1112,38 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "400": {
-                        "description": "Invalid request",
+                    }
+                }
+            }
+        },
+        "/users/password": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Change user password",
+                "parameters": [
+                    {
+                        "description": "Password info",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.ChangePasswordRequest"
                         }
-                    },
-                    "500": {
-                        "description": "Internal server error",
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handler.MessageResponse"
                         }
                     }
                 }
@@ -1151,12 +1170,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/database.User"
                         }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "type": "string"
-                        }
                     }
                 }
             }
@@ -1176,6 +1189,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "password_hash": {
                     "type": "string"
                 }
             }
@@ -1200,6 +1216,22 @@ const docTemplate = `{
                 },
                 "total_questions": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "old_password": {
+                    "type": "string"
                 }
             }
         },
@@ -1332,17 +1364,20 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "email",
-                "name"
+                "name",
+                "password"
             ],
             "properties": {
                 "email": {
-                    "description": "required: cannot be empty\nemail: must be a valid email format",
                     "type": "string"
                 },
                 "name": {
-                    "description": "min=2: must be at least 2 chars",
                     "type": "string",
                     "minLength": 2
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
                 }
             }
         },
@@ -1443,6 +1478,14 @@ const docTemplate = `{
                 },
                 "total_seconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },

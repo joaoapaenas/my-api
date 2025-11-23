@@ -23,7 +23,7 @@ func NewAnalyticsHandler(svc service.AnalyticsService) *AnalyticsHandler {
 // @Produce json
 // @Param start_date_from query string false "Start Date From (YYYY-MM-DD)"
 // @Param start_date_to query string false "Start Date To (YYYY-MM-DD)"
-// @Success 200 {array} database.GetTimeReportBySubjectRow
+// @Success 200 {array} handler.TimeReportResponse
 // @Router /analytics/time-report [get]
 func (h *AnalyticsHandler) GetTimeReport(w http.ResponseWriter, r *http.Request) {
 	startDateFrom := r.URL.Query().Get("start_date_from")
@@ -35,14 +35,26 @@ func (h *AnalyticsHandler) GetTimeReport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response (DTO)
+	response := make([]TimeReportResponse, len(report))
+	for i, row := range report {
+		response[i] = TimeReportResponse{
+			SubjectID:     row.SubjectID,
+			SubjectName:   row.SubjectName,
+			ColorHex:      row.ColorHex.String, // Extract string from sql.NullString
+			SessionsCount: int(row.SessionsCount),
+			TotalHoursNet: row.TotalHoursNet,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetGlobalAccuracy godoc
 // @Summary Get global accuracy by subject
 // @Tags analytics
 // @Produce json
-// @Success 200 {array} database.GetAccuracyBySubjectRow
+// @Success 200 {array} handler.AccuracyReportResponse
 // @Router /analytics/accuracy [get]
 func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Request) {
 	report, err := h.svc.GetGlobalAccuracy(r.Context())
@@ -51,7 +63,20 @@ func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response
+	response := make([]AccuracyReportResponse, len(report))
+	for i, row := range report {
+		response[i] = AccuracyReportResponse{
+			SubjectID:          row.SubjectID,
+			SubjectName:        row.SubjectName,
+			ColorHex:           row.ColorHex.String,
+			TotalQuestions:     int(row.TotalQuestions.Float64), // Handle sql.NullFloat64
+			TotalCorrect:       int(row.TotalCorrect.Float64),
+			AccuracyPercentage: row.AccuracyPercentage,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetWeakPoints godoc
@@ -59,7 +84,7 @@ func (h *AnalyticsHandler) GetGlobalAccuracy(w http.ResponseWriter, r *http.Requ
 // @Tags analytics
 // @Produce json
 // @Param subject_id path string true "Subject ID"
-// @Success 200 {array} database.GetAccuracyByTopicRow
+// @Success 200 {array} handler.TopicAccuracyResponse
 // @Router /analytics/weak-points/{subject_id} [get]
 func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request) {
 	subjectID := chi.URLParam(r, "subject_id")
@@ -74,7 +99,19 @@ func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, report)
+	// Map DB Result to JSON Response
+	response := make([]TopicAccuracyResponse, len(report))
+	for i, row := range report {
+		response[i] = TopicAccuracyResponse{
+			TopicID:            row.TopicID,
+			TopicName:          row.TopicName,
+			TotalQuestions:     int(row.TotalQuestions.Float64),
+			TotalCorrect:       int(row.TotalCorrect.Float64),
+			AccuracyPercentage: row.AccuracyPercentage,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 // GetHeatmap godoc
@@ -82,7 +119,7 @@ func (h *AnalyticsHandler) GetWeakPoints(w http.ResponseWriter, r *http.Request)
 // @Tags analytics
 // @Produce json
 // @Param days query int false "Number of days (default 30)"
-// @Success 200 {array} database.GetActivityHeatmapRow
+// @Success 200 {array} handler.HeatmapDayResponse
 // @Router /analytics/heatmap [get]
 func (h *AnalyticsHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 	daysStr := r.URL.Query().Get("days")
@@ -99,7 +136,31 @@ func (h *AnalyticsHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondWithJSON(w, http.StatusOK, heatmap)
+	// Map DB Result to JSON Response
+	response := make([]HeatmapDayResponse, len(heatmap))
+	for i, row := range heatmap {
+		// Handle interface{} types returned by SQLite driver for calculated fields
+		dateStr, _ := row.StudyDate.(string)
+
+		var totalSec int
+		// TotalSeconds might come back as int64 or float64 depending on the driver/OS
+		switch v := row.TotalSeconds.(type) {
+		case int64:
+			totalSec = int(v)
+		case float64:
+			totalSec = int(v)
+		default:
+			totalSec = 0
+		}
+
+		response[i] = HeatmapDayResponse{
+			StudyDate:     dateStr,
+			SessionsCount: int(row.SessionsCount),
+			TotalSeconds:  totalSec,
+		}
+	}
+
+	h.respondWithJSON(w, http.StatusOK, response)
 }
 
 func (h *AnalyticsHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

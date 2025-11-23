@@ -3,47 +3,45 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Port    string
-	DBUrl   string
-	Env     string
-	Timeout time.Duration
+	Port      string
+	DBUrl     string
+	Env       string
+	JWTSecret string
+	Timeout   time.Duration
 }
 
 func Load() (*Config, error) {
+	// Load .env file if it exists, ignore error if it doesn't
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:    getEnv("PORT", "8080"),
-		DBUrl:   getEnv("DB_URL", ""),
-		Env:     getEnv("ENV", "development"),
-		Timeout: 5 * time.Second,
+		Port:      getEnv("PORT", "8080"),
+		DBUrl:     getEnv("DB_URL", ""),
+		Env:       getEnv("ENV", "development"),
+		JWTSecret: getEnv("JWT_SECRET", "super-secret-key-change-me"),
+		Timeout:   5 * time.Second,
 	}
 
+	// Database Connection Logic
 	if cfg.DBUrl == "" {
 		if cfg.Env == "development" {
-			// 1. Get Absolute Path
-			wd, _ := os.Getwd()
-			rawPath := filepath.Join(wd, "dev.db")
-
-			// 2. Force Forward Slashes (Windows "B:\" breaks URI parsing, "B:/" works)
-			cleanPath := filepath.ToSlash(rawPath)
-
-			// 3. Construct "Compatibility Mode" DSN
-			// file: prefix is required for parameters to work
-			// _pragma=journal_mode(DELETE): No WAL/SHM files
-			// _pragma=temp_store(MEMORY): No temp files on disk
-			// _pragma=mmap_size(0): No memory mapping (fixes "Out of Memory" on some drives)
-			cfg.DBUrl = fmt.Sprintf("file:%s?_pragma=journal_mode(DELETE)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(0)", cleanPath)
+			// 2. Use relative path directly to match migration tool behavior
+			// This avoids complex absolute path resolution issues on Windows
+			cfg.DBUrl = "file:./dev.db?_pragma=journal_mode(DELETE)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(0)"
 		} else {
-			return nil, fmt.Errorf("DB_URL environment variable is required")
+			return nil, fmt.Errorf("DB_URL environment variable is required in production")
 		}
+	}
+
+	// Security Check for Production
+	if cfg.Env == "production" && cfg.JWTSecret == "super-secret-key-change-me" {
+		return nil, fmt.Errorf("JWT_SECRET environment variable is required in production")
 	}
 
 	return cfg, nil

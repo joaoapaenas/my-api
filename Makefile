@@ -1,6 +1,6 @@
 # Variables
 DB_URL=sqlite3://dev.db
-MIGRATE=migrate -path sql/schema -database "$(DB_URL)"
+MIGRATE=go run cmd/migrate/main.go
 
 .PHONY: build run migrate-up migrate-down clean generate test swagger
 
@@ -19,10 +19,10 @@ run-std:
 # Database Migrations
 migrate-up:
 	@if not exist dev.db type nul > dev.db
-	$(MIGRATE) up
+	$(MIGRATE) -direction up
 
 migrate-down:
-	$(MIGRATE) down
+	$(MIGRATE) -direction down
 
 # Generate SQLC and Swagger code
 generate:

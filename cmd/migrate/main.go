@@ -2,45 +2,50 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"log"
-	"os"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/sqlite3"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
-	db, err := sql.Open("sqlite3", "dev.db")
+	var direction string
+	flag.StringVar(&direction, "direction", "up", "migration direction (up or down)")
+	flag.Parse()
+
+	db, err := sql.Open("sqlite", "dev.db")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
+	driver, err := sqlite.WithInstance(db, &sqlite.Config{})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create migration driver: %v", err)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://sql/schema",
-		"sqlite3",
+		"sqlite",
 		driver,
 	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create migrate instance: %v", err)
 	}
 
-	if len(os.Args) > 1 && os.Args[1] == "down" {
-		if err := m.Down(); err != nil && err != migrate.ErrNoChange {
-			log.Fatal(err)
-		}
-		log.Println("Migration down successful")
-	} else {
+	if direction == "up" {
 		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-			log.Fatal(err)
+			log.Fatalf("Migration up failed: %v", err)
 		}
-		log.Println("Migration up successful")
+		log.Println("Migrations applied successfully (UP)")
+	} else if direction == "down" {
+		if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+			log.Fatalf("Migration down failed: %v", err)
+		}
+		log.Println("Migrations applied successfully (DOWN)")
+	} else {
+		log.Fatalf("Invalid direction: %s", direction)
 	}
 }

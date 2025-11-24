@@ -3,13 +3,13 @@
     Project Task Runner (Makefile replacement for Windows)
 #>
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateSet("build", "run", "migrate-up", "migrate-down", "generate", "clean", "test")]
     [string]$Task
 )
 
-$DB_URL = "sqlite3://dev.db"
-$MIGRATE_CMD = "migrate -path sql/schema -database ""$DB_URL"""
+
+$MIGRATE_CMD = "go run cmd/migrate/main.go"
 
 switch ($Task) {
     "build" {
@@ -17,6 +17,14 @@ switch ($Task) {
         go build -o bin/api.exe cmd/api/main.go
     }
     "run" {
+        Write-Host "Generating Swagger docs..." -ForegroundColor Cyan
+        swag init -g cmd/api/main.go
+        if ($LASTEXITCODE -ne 0) { Write-Error "Swagger generation failed"; exit 1 }
+        
+        Write-Host "Running migrations UP..." -ForegroundColor Cyan
+        Invoke-Expression "$MIGRATE_CMD -direction up"
+        if ($LASTEXITCODE -ne 0) { Write-Error "Migration failed"; exit 1 }
+
         Write-Host "Starting Air..." -ForegroundColor Cyan
         air
     }
@@ -26,11 +34,11 @@ switch ($Task) {
             New-Item -Path dev.db -ItemType File | Out-Null
         }
         Write-Host "Running migrations UP..." -ForegroundColor Cyan
-        Invoke-Expression "$MIGRATE_CMD up"
+        Invoke-Expression "$MIGRATE_CMD -direction up"
     }
     "migrate-down" {
         Write-Host "Running migrations DOWN..." -ForegroundColor Cyan
-        Invoke-Expression "$MIGRATE_CMD down"
+        Invoke-Expression "$MIGRATE_CMD -direction down"
     }
     "generate" {
         Write-Host "Generating SQLC code..." -ForegroundColor Cyan
